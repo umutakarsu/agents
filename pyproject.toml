@@ -1,0 +1,20 @@
+[project]
+name = "memlayer"
+version = "0.1.0"
+description = "A shared memory/context layer for AI agents (Nexus-style). Foundation phase."
+requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary]>=3.1",
+    "pgvector>=0.2.5",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# Real embedding providers. The default embedder is offline/deterministic
+# so the pipeline runs with zero API keys.
+voyage = ["voyageai>=0.2"]
+openai = ["openai>=1.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["memlayer*"]
