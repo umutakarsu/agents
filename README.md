@@ -1,21 +1,27 @@
 # memlayer
 
 A shared memory / context layer for AI agents — the Nexus-style architecture,
-built from scratch to understand it. **Phases 0–2 built**: ingestion +
-content-addressed dedup + embeddings with ACL + hybrid retrieval.
+built from scratch to understand it. **Phases 0–3 built and verified
+end-to-end on Postgres**: ingestion + content-addressed dedup + ACL +
+hybrid retrieval + provenance-carrying write-back.
 
 ## What this proves
 
-Three of the four hard problems in a real memory layer:
+All four hard problems in a real memory layer:
 
 1. **Freshness vs. cost** — embeddings are keyed by `content_hash`. Re-ingesting
-   unchanged content computes **zero** new embeddings. A one-paragraph doc edit
-   re-embeds one chunk, not the whole document.
+   unchanged content computes **zero** new embeddings; an identical *section*
+   recurring across documents is embedded once (heading-aware chunking).
 2. **Permissions, decoupled from embeddings** — ACLs live in `chunk_acl`, not in
    the vector. A permission change is a metadata patch, never a re-embed.
 3. **Trustworthy retrieval** — vector + full-text fused with RRF, with the ACL
    filter applied as a **pre-filter inside both arms in SQL**. A caller can
    never rank, count, or leak a chunk they aren't allowed to see.
+4. **Write-back with provenance + conflict resolution** — memory is
+   append-only; superseding sets a pointer, never deletes. Precedence is
+   (source rank, confidence, recency): human > system > agent. A low-confidence
+   agent guess can never overwrite a human correction, and the full trail
+   stays auditable.
 
 (Write-back with provenance and the agent loop are Phases 3–4 — not built yet.)
 
@@ -70,18 +76,36 @@ python scripts/search.py "secret roadmap acquire competitor" \
 The filter is a SQL pre-filter inside both retrieval arms, so the forbidden
 chunk is never ranked, counted, or returned for `group:all`.
 
+### Prove conflict-resolved write-back (Phase 3)
+
+```bash
+# Agent infers something (low confidence).
+python scripts/remember.py acme person:ali \
+    "Ali leads retrieval" --source agent:email-scanner --confidence 0.6
+# Human corrects it (high confidence) -> becomes current.
+python scripts/remember.py acme person:ali \
+    "Ali leads Platform" --source human:manager --confidence 0.95
+# A later low-confidence agent guess CANNOT override the human.
+python scripts/remember.py acme person:ali \
+    "Ali maybe left" --source agent:slack-scanner --confidence 0.4
+
+python scripts/recall.py acme person:ali             # the human's memory
+python scripts/recall.py acme person:ali --history   # full audit trail
+```
+
 ## Layout
 
 | Path | Role |
 |---|---|
-| `schema.sql` | Full schema (incl. `memory` for later phases) |
-| `memlayer/chunking.py` | Normalize + sha256 content addressing |
+| `schema.sql` | Full schema |
+| `memlayer/chunking.py` | Heading-aware split + sha256 content addressing |
 | `memlayer/embeddings.py` | Provider abstraction (local/voyage/openai) |
 | `memlayer/ingest.py` | The pipeline + dedup gate |
 | `memlayer/retrieval.py` | Hybrid vector+FTS, RRF fusion, ACL pre-filter |
+| `memlayer/writeback.py` | Append-only memory + conflict resolution |
 | `memlayer/connectors/` | Thin source adapters (local files today) |
 
 ## Next phases
 
-- **3** — Write-back: append-only `memory` with provenance + confidence.
-- **4** — More connectors (GitHub, MCP), scheduling, multi-tenancy hardening.
+- **4** — More connectors (GitHub, MCP), scheduling, multi-tenancy hardening,
+  retrieval that also reads back from `memory` (not just raw chunks).
