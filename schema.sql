@@ -71,3 +71,9 @@ CREATE INDEX IF NOT EXISTS idx_memory_entity ON memory (workspace, entity_key);
 -- HNSW for predictable p95 latency at the 1-10M vector scale.
 CREATE INDEX IF NOT EXISTS idx_embeddings_hnsw
     ON embeddings USING hnsw (embedding vector_cosine_ops);
+-- GIN over the FTS arm. Expression index so chunks.text needs no extra column.
+CREATE INDEX IF NOT EXISTS idx_chunks_fts
+    ON chunks USING gin (to_tsvector('english', text));
+-- ACL pre-filter touches this on every query; index the lookup + array overlap.
+CREATE INDEX IF NOT EXISTS idx_chunk_acl_lookup
+    ON chunk_acl USING gin (allowed_principals);
