@@ -17,18 +17,37 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(normalize(text).encode()).hexdigest()
 
 
+_HEADING = re.compile(r"^#{1,6}\s", re.MULTILINE)
+
+
+def _sections(text: str) -> list[str]:
+    # Split on markdown headings so a repeated section is content-addressed
+    # on its own. This is where real cross-source dedup pays off: boilerplate,
+    # quoted threads and reply chains recur as identical *sections*, not
+    # identical whole documents.
+    bounds = [m.start() for m in _HEADING.finditer(text)]
+    if not bounds:
+        return [text]
+    if bounds[0] != 0:
+        bounds.insert(0, 0)
+    bounds.append(len(text))
+    return [text[bounds[i] : bounds[i + 1]] for i in range(len(bounds) - 1)]
+
+
 def chunk(text: str, max_chars: int = 1200) -> list[str]:
-    # Paragraph-greedy: pack paragraphs up to max_chars. Keeps semantically
-    # related text together so a one-paragraph edit invalidates one chunk.
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    # Heading-aware, then paragraph-greedy within each section: pack paragraphs
+    # up to max_chars so a one-paragraph edit invalidates one chunk, while a
+    # repeated section dedupes across documents/sources.
     chunks: list[str] = []
-    buf = ""
-    for p in paragraphs:
-        if buf and len(buf) + len(p) + 2 > max_chars:
+    for section in _sections(text):
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", section) if p.strip()]
+        buf = ""
+        for p in paragraphs:
+            if buf and len(buf) + len(p) + 2 > max_chars:
+                chunks.append(buf)
+                buf = p
+            else:
+                buf = f"{buf}\n\n{p}" if buf else p
+        if buf:
             chunks.append(buf)
-            buf = p
-        else:
-            buf = f"{buf}\n\n{p}" if buf else p
-    if buf:
-        chunks.append(buf)
     return chunks

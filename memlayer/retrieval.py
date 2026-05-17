@@ -42,7 +42,7 @@ def _vector_arm(cur, qvec, ws, principals, k) -> list[str]:
         SELECT v.content_hash
         FROM visible v
         JOIN embeddings e ON e.content_hash = v.content_hash
-        ORDER BY e.embedding <=> %(q)s
+        ORDER BY e.embedding <=> %(q)s::vector
         LIMIT %(k)s
         """,
         {"ws": ws, "principals": principals, "q": qvec, "k": k},
