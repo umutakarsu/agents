@@ -37,18 +37,20 @@ def remember(
     source_id: str,
     derived_from: list[int] | None = None,
     confidence: float = 0.5,
+    allowed_principals: list[str] | None = None,
 ) -> tuple[int, bool]:
     """Append a memory. Returns (memory_id, is_current). is_current is False
     when an existing memory outranks this one -- the new row is still stored
     for audit, but immediately superseded."""
     derived_from = derived_from or []
+    allowed_principals = allowed_principals or ["group:all"]
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO memory
                 (workspace, entity_key, content, source_type, source_id,
-                 derived_from, confidence)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                 derived_from, confidence, allowed_principals)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -59,6 +61,7 @@ def remember(
                 source_id,
                 derived_from,
                 confidence,
+                allowed_principals,
             ),
         )
         new_id = cur.fetchone()[0]

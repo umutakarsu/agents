@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS memory (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     superseded_by BIGINT      REFERENCES memory(id)
 );
+-- Memory carries its own ACL so retrieval can pre-filter distilled knowledge
+-- with the same trust guarantee as raw chunks. Idempotent migration for
+-- databases created before this column existed.
+ALTER TABLE memory
+    ADD COLUMN IF NOT EXISTS allowed_principals TEXT[] NOT NULL DEFAULT '{group:all}';
 
 CREATE INDEX IF NOT EXISTS idx_raw_events_workspace ON raw_events (workspace);
 CREATE INDEX IF NOT EXISTS idx_memory_entity ON memory (workspace, entity_key);
@@ -74,6 +79,9 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_hnsw
 -- GIN over the FTS arm. Expression index so chunks.text needs no extra column.
 CREATE INDEX IF NOT EXISTS idx_chunks_fts
     ON chunks USING gin (to_tsvector('english', text));
+-- FTS over distilled memory (the third retrieval arm).
+CREATE INDEX IF NOT EXISTS idx_memory_fts
+    ON memory USING gin (to_tsvector('english', content));
 -- ACL pre-filter touches this on every query; index the lookup + array overlap.
 CREATE INDEX IF NOT EXISTS idx_chunk_acl_lookup
     ON chunk_acl USING gin (allowed_principals);
