@@ -8,12 +8,20 @@ the hard-problem behaviours hold across ingestion, ACL pre-filter,
 conflict-resolved write-back, and memory-aware retrieval.
 """
 
+import inspect
 import sys
 from datetime import datetime, timezone
 
+from memlayer import federated
 from memlayer.compress import compress, lineage
 from memlayer.connectors.local_files import read_dir
 from memlayer.db import connect
+from memlayer.federated import (
+    attribute_check,
+    compute_synonyms,
+    expand_query,
+    index_workspace,
+)
 from memlayer.governance import (
     assign_writer,
     authority_for,
@@ -51,13 +59,14 @@ def _is_superseded(memory_id: int) -> bool:
 
 def reset() -> None:
     with connect() as conn, conn.cursor() as cur:
-        # summary_lineage + memory_conflict reference memory(id); explicit
-        # TRUNCATE order keeps this resilient regardless of which phase's
-        # schema is applied. CASCADE handles identity / governance fks.
+        # summary_lineage + memory_conflict reference memory(id); concept_*
+        # tables are global (federated layer). Explicit TRUNCATE order keeps
+        # this resilient regardless of which phase's schema is applied.
         cur.execute(
             "TRUNCATE summary_lineage, memory_conflict, memory, "
             "chunk_acl, embeddings, event_chunks, chunks, raw_events, "
-            "redactions_log, writer_role, authority_policy, role "
+            "redactions_log, writer_role, authority_policy, role, "
+            "concept_synonym, tenant_concept, concept "
             "RESTART IDENTITY CASCADE"
         )
         conn.commit()
@@ -492,6 +501,185 @@ def main() -> None:
         "flat ladder fallback: no conflict surfaced (delta > epsilon)",
         bare_open == [],
     )
+
+    print("Phase 10: federated cross-tenant concept ontology")
+    # Seed three synthetic workspaces with overlapping common vocabulary
+    # ("code review", "pull request", "customer churn") and tenant-specific
+    # vocabulary ("acme widget" only in tenant_a, "globex sprocket" only in
+    # tenant_b). The common terms should rise as cross-tenant concepts; the
+    # tenant-specific terms must stay tenant-private.
+    now = datetime.now(timezone.utc)
+    common_text = (
+        "# Engineering\n\n"
+        "## Code review\n"
+        "Every pull request goes through code review. "
+        "Code review is mandatory before merge. "
+        "The code review process catches bugs early.\n\n"
+        "## Customer churn\n"
+        "We track customer churn weekly. "
+        "Customer churn dropped 5% last quarter. "
+        "Reducing customer churn is a top priority.\n\n"
+        "## Pull request\n"
+        "Open a pull request, request code review, then merge. "
+        "A pull request without code review never lands.\n"
+    )
+    tenant_a_text = (
+        common_text
+        + "\n## Acme widget\n"
+        "The acme widget ships next quarter. "
+        "Our acme widget pipeline pairs with code review gates. "
+        "Acme widget revenue offsets customer churn risk.\n"
+    )
+    tenant_b_text = (
+        common_text
+        + "\n## Globex sprocket\n"
+        "Globex sprocket inventory is low. "
+        "Order more globex sprocket before the customer churn review. "
+        "The globex sprocket team also runs code review.\n"
+    )
+    tenant_c_text = common_text + (
+        "\n## Onboarding\n"
+        "New hires shadow code review for a week. "
+        "They submit a pull request and watch customer churn dashboards.\n"
+    )
+    for ws, text in [
+        ("tenant_a", tenant_a_text),
+        ("tenant_b", tenant_b_text),
+        ("tenant_c", tenant_c_text),
+    ]:
+        ingest(
+            [
+                SourceItem(
+                    source="docs",
+                    source_id=f"{ws}-handbook",
+                    text=text,
+                    occurred_at=now,
+                )
+            ],
+            workspace=ws,
+        )
+        index_workspace(ws)
+
+    n_syn = compute_synonyms(min_tenants=2, min_cooccurrence=2)
+
+    with connect() as conn, conn.cursor() as cur:
+        # 4. 'code review' is a cross-tenant concept seen by all three.
+        cur.execute(
+            "SELECT tenant_count, global_count FROM concept WHERE name = %s",
+            ("code review",),
+        )
+        cr_row = cur.fetchone()
+        check(
+            "concept 'code review' present", cr_row is not None
+        )
+        check(
+            "concept 'code review' tenant_count == 3",
+            cr_row is not None and cr_row[0] == 3,
+        )
+
+        # 5. 'acme widget' is single-tenant only.
+        cur.execute(
+            "SELECT tenant_count FROM concept WHERE name = %s",
+            ("acme widget",),
+        )
+        aw_row = cur.fetchone()
+        check("concept 'acme widget' present", aw_row is not None)
+        check(
+            "concept 'acme widget' tenant_count == 1",
+            aw_row is not None and aw_row[0] == 1,
+        )
+
+        # 6a. Per-tenant data stays per-tenant: tenant_a has 'acme widget' in
+        # tenant_concept, but tenant_b does NOT.
+        cur.execute(
+            """
+            SELECT 1 FROM tenant_concept tc
+            JOIN concept c ON c.id = tc.concept_id
+            WHERE tc.workspace = %s AND c.name = %s
+            """,
+            ("tenant_a", "acme widget"),
+        )
+        a_has_aw = cur.fetchone() is not None
+        cur.execute(
+            """
+            SELECT 1 FROM tenant_concept tc
+            JOIN concept c ON c.id = tc.concept_id
+            WHERE tc.workspace = %s AND c.name = %s
+            """,
+            ("tenant_b", "acme widget"),
+        )
+        b_has_aw = cur.fetchone() is not None
+        check(
+            "tenant_concept: tenant_a HAS 'acme widget'", a_has_aw
+        )
+        check(
+            "tenant_concept: tenant_b does NOT have 'acme widget'",
+            not b_has_aw,
+        )
+
+        # 6b. concept_synonym never references a single-tenant concept.
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM concept_synonym s
+            JOIN concept ca ON ca.id = s.concept_a
+            JOIN concept cb ON cb.id = s.concept_b
+            WHERE ca.tenant_count < 2 OR cb.tenant_count < 2
+            """
+        )
+        bad_syn = cur.fetchone()[0]
+        check(
+            "concept_synonym never references a single-tenant concept",
+            bad_syn == 0,
+        )
+
+        # 6b'. Specifically, 'acme widget' must not appear in any synonym
+        # row -- it would betray tenant_a.
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM concept_synonym s
+            WHERE s.concept_a = (SELECT id FROM concept WHERE name = 'acme widget')
+               OR s.concept_b = (SELECT id FROM concept WHERE name = 'acme widget')
+            """
+        )
+        aw_in_syn = cur.fetchone()[0]
+        check(
+            "'acme widget' appears in NO synonym row", aw_in_syn == 0
+        )
+
+    # 6c. Examine the SQL the federated module issues. Assert that none of
+    # the cross-tenant aggregation paths (compute_synonyms, expand_query)
+    # SELECT chunk text or memory content. We grep the source for the
+    # SQL these functions actually use.
+    src_compute = inspect.getsource(federated.compute_synonyms)
+    src_expand = inspect.getsource(federated.expand_query)
+    forbidden = ("chunks.text", "memory.content", "c.text", "raw_events")
+    check(
+        "compute_synonyms SQL never reads chunk/memory CONTENT",
+        not any(tok in src_compute for tok in forbidden),
+    )
+    check(
+        "expand_query SQL never reads chunk/memory CONTENT",
+        not any(tok in src_expand for tok in forbidden),
+    )
+
+    # 6d. Privacy self-test passes for every tenant.
+    for ws in ("tenant_a", "tenant_b", "tenant_c"):
+        rep = attribute_check(ws)
+        check(
+            f"attribute_check ok for workspace={ws!r}",
+            rep["ok"] and rep["single_tenant_synonyms"] == 0,
+        )
+
+    # 7. Query expansion: 'pull request feedback' shares the 'pull request'
+    # concept with the cross-tenant corpus. Expect at least one synonym from
+    # the cluster of co-occurring concepts ('code review', 'customer churn').
+    expansions = expand_query("pull request feedback")
+    check(
+        "expand_query returns >=1 cross-tenant synonym for "
+        "'pull request feedback'",
+        len(expansions) >= 1,
+    )
+    print(f"  (expansion sample: {expansions[:5]})  synonyms_written={n_syn}")
 
     print()
     if _FAILS:

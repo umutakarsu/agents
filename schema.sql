@@ -323,3 +323,43 @@ CREATE TABLE IF NOT EXISTS memory_conflict (
 );
 CREATE INDEX IF NOT EXISTS memory_conflict_pending_idx
     ON memory_conflict (workspace, status) WHERE status = 'pending';
+
+-- Phase 10: federated cross-tenant concept ontology.
+-- Privacy contract: this layer stores concept NAMES + AGGREGATE counts + SYNONYM
+-- pairs derived from co-occurrence across tenants. No content, no entity_keys,
+-- no per-tenant attribution is ever shared cross-tenant.
+
+CREATE TABLE IF NOT EXISTS concept (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,                -- 'code review', 'customer churn'
+    global_count INT NOT NULL DEFAULT 0,      -- summed across tenants, but NOT attributed
+    tenant_count INT NOT NULL DEFAULT 0,      -- how many distinct tenants this appeared in
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS concept_name_idx ON concept (name);
+
+-- Per-tenant. NEVER returned in cross-tenant queries. Used only to compute the
+-- aggregates in `concept`.
+CREATE TABLE IF NOT EXISTS tenant_concept (
+    id BIGSERIAL PRIMARY KEY,
+    workspace TEXT NOT NULL,
+    concept_id BIGINT NOT NULL REFERENCES concept(id),
+    local_count INT NOT NULL,
+    last_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (workspace, concept_id)
+);
+CREATE INDEX IF NOT EXISTS tenant_concept_workspace_idx ON tenant_concept (workspace);
+
+-- Cross-tenant synonyms. A pair (a, b) is a synonym if both appear in the same
+-- chunks/memory across N>=2 INDEPENDENT tenants. Stored once per pair.
+CREATE TABLE IF NOT EXISTS concept_synonym (
+    id BIGSERIAL PRIMARY KEY,
+    concept_a BIGINT NOT NULL REFERENCES concept(id),
+    concept_b BIGINT NOT NULL REFERENCES concept(id),
+    cooccurrence_tenants INT NOT NULL,        -- how many distinct tenants saw both together
+    confidence REAL NOT NULL,
+    last_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (concept_a, concept_b),
+    CHECK (concept_a < concept_b)
+);
