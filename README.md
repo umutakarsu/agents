@@ -120,8 +120,8 @@ python scripts/ingest_mcp.py https://my-mcp.example/mcp \
 
 ## Next phases
 
-- **4 (remaining)** — Phase 4 e2e assertions on memory-aware retrieval;
-  scheduling; multi-tenancy hardening.
+- **5** — Scheduling (periodic connector runs), multi-tenancy hardening,
+  cross-workspace audit tooling.
 
 ### Watch it all run
 

@@ -1,10 +1,11 @@
-"""End-to-end regression test for Phases 0-3 against a real Postgres.
+"""End-to-end regression test for Phases 0-4 against a real Postgres.
 No test framework -- standalone so it runs anywhere the app runs.
 
     python scripts/e2e_test.py        # exits non-zero on any failure
 
 Resets the data (TRUNCATE, never drops the schema/extension), then asserts
-the four hard-problem behaviours hold.
+the hard-problem behaviours hold across ingestion, ACL pre-filter,
+conflict-resolved write-back, and memory-aware retrieval.
 """
 
 import sys
@@ -76,6 +77,45 @@ def main() -> None:
     check("human memory is current", cur is not None
           and cur.source_type == "human")
     check("low-confidence agent guess is superseded", is_cur is False)
+
+    print("Phase 4: memory-aware retrieval + memory ACL")
+    # Distinct entity_keys so neither memory is superseded by the other.
+    remember(WS, "topic:layoffs",
+             "Execs are reviewing a layoff plan for Q1.",
+             "human", "manager", confidence=0.9,
+             allowed_principals=["group:exec"])
+    remember(WS, "topic:strategy",
+             "Q4 focus is a shared context layer for AI agents.",
+             "human", "lead", confidence=0.9,
+             allowed_principals=["group:all"])
+
+    qm = "layoffs plan Q1"
+    public_mem = search(qm, WS, ["group:all"], k=10)
+    exec_mem = search(qm, WS, ["group:exec"], k=10)
+    public_leaked_mem = any(
+        h.kind == "memory" and "layoff" in h.text.lower() for h in public_mem
+    )
+    exec_visible_mem = any(
+        h.kind == "memory" and "layoff" in h.text.lower() for h in exec_mem
+    )
+    check("memory ACL: group:all cannot see exec-only memory",
+          not public_leaked_mem)
+    check("memory ACL: group:exec can see exec-only memory",
+          exec_visible_mem)
+
+    # The strategy memory phrasing overlaps with the public docs, so this
+    # query hits both raw chunks and the memory arm.
+    blended = search("shared context layer", WS, ["group:all"], k=10)
+    kinds = {h.kind for h in blended}
+    check("retrieval surfaces memory as kind='memory'", "memory" in kinds)
+    check("retrieval still surfaces raw chunks alongside memory",
+          "chunk" in kinds)
+
+    mem_hits = [h for h in blended if h.kind == "memory"]
+    check("memory hits carry provenance",
+          bool(mem_hits) and all(h.provenance for h in mem_hits))
+    check("memory hits carry confidence",
+          bool(mem_hits) and all(h.confidence is not None for h in mem_hits))
 
     print()
     if _FAILS:
