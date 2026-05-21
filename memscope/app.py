@@ -117,3 +117,8 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(str(STATIC / "index.html"))
+
+
+@app.get("/pitch")
+def pitch() -> FileResponse:
+    return FileResponse(str(STATIC / "pitch.html"))
