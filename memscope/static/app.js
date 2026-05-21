@@ -12,12 +12,19 @@ function memscope() {
     tab: 'dag',
     wsList: [],
 
-    // ---------- landing / story mode ----------
-    // The demo opens on a landing page with three big scenarios; the tabs
-    // are only revealed once a scenario has been run (or the user clicks
-    // a "jump straight to view" link). This keeps strangers from staring
-    // at empty panels.
-    landingMode: true,
+    // ---------- view routing ----------
+    // The app has three top-level views:
+    //   'home'      -- the product landing page (what is memlayer?)
+    //   'scenarios' -- the three big scenario cards
+    //   'app'       -- the tab content (DAG / Search / Pipeline)
+    // First-time visitors land on 'home'. The "Try a scenario" button takes
+    // them to 'scenarios'. Running a scenario takes them to 'app'.
+    view: 'home',
+
+    // Back-compat shim: parts of the codebase still reference landingMode.
+    // It is now derived from `view` and writes flip the view appropriately.
+    get landingMode() { return this.view === 'scenarios'; },
+    set landingMode(v) { this.view = v ? 'scenarios' : 'app'; },
 
     // Per-view info banners (dismissible).
     dagBannerDismissed: false,
@@ -81,17 +88,39 @@ function memscope() {
     },
 
     // =====================================================
-    // Landing / scenario plumbing
+    // View routing
     // =====================================================
-    showLanding() {
-      this.landingMode = true;
-      // Close any open help modal.
+    showHome() {
+      this.view = 'home';
       this.helpOpen = false;
+      // When returning to the top of the funnel, scroll back to the top so
+      // the hero is the first thing the user sees.
+      this.$nextTick(() => {
+        if (typeof window !== 'undefined' && window.scrollTo) {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    },
+
+    showLanding() {
+      // Legacy name; the "Try a scenario" button still calls this. Now means
+      // "show the scenario picker".
+      this.view = 'scenarios';
+      this.helpOpen = false;
+    },
+
+    scrollToHowItWorks() {
+      this.$nextTick(() => {
+        const el = document.getElementById('how-it-works');
+        if (el && el.scrollIntoView) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
     },
 
     jumpToTab(name) {
       this.tab = name;
-      this.landingMode = false;
+      this.view = 'app';
     },
 
     openHelp(view) {

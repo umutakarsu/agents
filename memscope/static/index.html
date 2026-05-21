@@ -12,25 +12,267 @@
   <div x-data="memscope()" x-init="init()" class="app">
 
     <header class="topbar">
-      <div class="brand">
+      <button type="button" class="brand brand-btn" @click="showHome()" aria-label="memscope home">
         <h1>memscope</h1>
         <span class="subtitle">memory inspector</span>
-      </div>
-      <nav class="tabs" role="tablist" x-show="!landingMode">
+      </button>
+      <nav class="tabs" role="tablist" x-show="view === 'app'">
         <button class="tab" role="tab" :class="{ active: tab === 'dag' }" @click="tab = 'dag'">DAG</button>
         <button class="tab" role="tab" :class="{ active: tab === 'search' }" @click="tab = 'search'">Search</button>
         <button class="tab" role="tab" :class="{ active: tab === 'pipeline' }" @click="tab = 'pipeline'">Pipeline</button>
       </nav>
       <div class="topbar-right">
+        <button class="topbar-home" x-show="view !== 'home'" @click="showHome()" aria-label="Back to home" title="Back to home">
+          &larr; Home
+        </button>
         <button class="btn scenario-btn" @click="showLanding()">
           <span class="scenario-icon">&#9733;</span> Try a scenario
         </button>
       </div>
     </header>
 
-    <!-- =========================== LANDING / STORY MODE =========================== -->
-    <main class="content" x-show="landingMode">
+    <!-- =========================== HOME / PRODUCT LANDING =========================== -->
+    <main class="content home" x-show="view === 'home'">
+
+      <!-- Hero -->
+      <section class="home-hero">
+        <div class="home-eyebrow">
+          <span class="eyebrow-dot"></span>
+          A shared memory substrate for AI tools
+        </div>
+        <h1 class="home-title">AI tools that actually know your company.</h1>
+        <p class="home-sub">
+          One shared, permission-aware memory. Every agent reads and writes through a single API.
+        </p>
+        <div class="home-cta-row">
+          <button class="btn primary home-cta" @click="showLanding()">
+            See it in 60 seconds &rarr;
+          </button>
+          <button class="btn ghost home-cta-secondary" @click="scrollToHowItWorks()">
+            Read how it works &darr;
+          </button>
+        </div>
+      </section>
+
+      <!-- Problem section -->
+      <section class="home-section home-problem">
+        <div class="home-section-head">
+          <span class="section-kicker">The problem</span>
+          <h2 class="section-title">Every AI tool starts from zero.</h2>
+        </div>
+        <div class="home-problem-body">
+          <p class="home-prose">
+            Today every AI tool in your company starts from zero. Slack doesn't know what's
+            in Notion. Your coding agent forgets last week's decisions. Each tool reinvents
+            the same integrations &mdash; and inevitably leaks data it shouldn't. Connectors
+            are now commodity (MCP made them so). What's missing is the substrate underneath:
+            <strong>one shared, permission-aware memory every AI tool can trust.</strong>
+          </p>
+
+          <div class="ba-grid">
+            <!-- Before: tangled mesh, each agent to each source -->
+            <div class="ba-card ba-before">
+              <div class="ba-label">Today &mdash; tangled mesh</div>
+              <div class="ba-diagram ba-mesh" aria-hidden="true">
+                <div class="ba-mesh-agents">
+                  <div class="ba-node ba-agent">Slack&nbsp;bot</div>
+                  <div class="ba-node ba-agent">Coding&nbsp;agent</div>
+                  <div class="ba-node ba-agent">Support&nbsp;AI</div>
+                </div>
+                <svg class="ba-mesh-lines" viewBox="0 0 240 80" preserveAspectRatio="none" aria-hidden="true">
+                  <path d="M 30 10 L 30 70" />
+                  <path d="M 30 10 L 120 70" />
+                  <path d="M 30 10 L 210 70" />
+                  <path d="M 120 10 L 30 70" />
+                  <path d="M 120 10 L 120 70" />
+                  <path d="M 120 10 L 210 70" />
+                  <path d="M 210 10 L 30 70" />
+                  <path d="M 210 10 L 120 70" />
+                  <path d="M 210 10 L 210 70" />
+                </svg>
+                <div class="ba-mesh-sources">
+                  <div class="ba-node ba-source">Notion</div>
+                  <div class="ba-node ba-source">GitHub</div>
+                  <div class="ba-node ba-source">Drive</div>
+                </div>
+              </div>
+              <div class="ba-caption">N&times;M integrations. Leaks waiting to happen.</div>
+            </div>
+
+            <!-- After: clean star through memlayer -->
+            <div class="ba-card ba-after">
+              <div class="ba-label">With memlayer &mdash; one substrate</div>
+              <div class="ba-diagram ba-star" aria-hidden="true">
+                <div class="ba-mesh-agents">
+                  <div class="ba-node ba-agent">Slack&nbsp;bot</div>
+                  <div class="ba-node ba-agent">Coding&nbsp;agent</div>
+                  <div class="ba-node ba-agent">Support&nbsp;AI</div>
+                </div>
+                <svg class="ba-star-lines" viewBox="0 0 240 120" preserveAspectRatio="none" aria-hidden="true">
+                  <path d="M 30 8 L 120 60" />
+                  <path d="M 120 8 L 120 60" />
+                  <path d="M 210 8 L 120 60" />
+                  <path d="M 120 60 L 30 112" />
+                  <path d="M 120 60 L 120 112" />
+                  <path d="M 120 60 L 210 112" />
+                </svg>
+                <div class="ba-hub">memlayer</div>
+                <div class="ba-mesh-sources">
+                  <div class="ba-node ba-source">Notion</div>
+                  <div class="ba-node ba-source">GitHub</div>
+                  <div class="ba-node ba-source">Drive</div>
+                </div>
+              </div>
+              <div class="ba-caption">One API. One permission model. One source of truth.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- How it works -->
+      <section class="home-section home-how" id="how-it-works">
+        <div class="home-section-head">
+          <span class="section-kicker">How it works</span>
+          <h2 class="section-title">Four properties, all enforced in the data layer.</h2>
+          <p class="section-lede">
+            Not promises in the prompt. Not policy in the app. Properties of the substrate
+            itself &mdash; so every agent reading through it inherits them for free.
+          </p>
+        </div>
+
+        <div class="property-grid">
+
+          <article class="property-card">
+            <div class="property-cue cue-dedup" aria-hidden="true">
+              <div class="cue-doc">DOC</div>
+              <div class="cue-arrow">&rarr;</div>
+              <div class="cue-hash mono">#a3f9</div>
+              <div class="cue-arrow">&rarr;</div>
+              <div class="cue-zero">0</div>
+            </div>
+            <div class="property-body">
+              <div class="property-eyebrow mono">content-addressed dedup</div>
+              <h3 class="property-title">Pay once, never twice.</h3>
+              <p class="property-text">
+                Every chunk is keyed by a hash of its content. Re-ingesting the same
+                doc costs zero &mdash; the system refuses to pay twice for the same paragraph.
+              </p>
+            </div>
+          </article>
+
+          <article class="property-card">
+            <div class="property-cue cue-acl" aria-hidden="true">
+              <div class="cue-asker cue-blocked">
+                <span class="cue-asker-label mono">all</span>
+                <span class="cue-asker-result">&#10006;</span>
+              </div>
+              <div class="cue-gate">SQL pre-filter</div>
+              <div class="cue-asker cue-allowed">
+                <span class="cue-asker-label mono">exec</span>
+                <span class="cue-asker-result">&#10004;</span>
+              </div>
+            </div>
+            <div class="property-body">
+              <div class="property-eyebrow mono">SQL-side ACL pre-filter</div>
+              <h3 class="property-title">Permissions that can't leak.</h3>
+              <p class="property-text">
+                The permission filter runs inside the database, before search ranks
+                anything. Forbidden content is never ranked, counted, or returned &mdash;
+                not even by accident.
+              </p>
+            </div>
+          </article>
+
+          <article class="property-card">
+            <div class="property-cue cue-precedence" aria-hidden="true">
+              <div class="cue-stack">
+                <div class="cue-row cue-row-agent"><span class="cue-tag">AGENT</span><span class="cue-pct mono">60%</span></div>
+                <div class="cue-row cue-row-human cue-row-current"><span class="cue-tag">HUMAN</span><span class="cue-pct mono">95%</span></div>
+                <div class="cue-row cue-row-agent cue-row-blocked"><span class="cue-tag">AGENT</span><span class="cue-pct mono">40%</span></div>
+              </div>
+            </div>
+            <div class="property-body">
+              <div class="property-eyebrow mono">append-only memory with source precedence</div>
+              <h3 class="property-title">Conflict resolution built in.</h3>
+              <p class="property-text">
+                When an agent and a human disagree, the human wins &mdash; and the trail
+                stays. A low-confidence agent guess literally cannot overwrite a human
+                correction.
+              </p>
+            </div>
+          </article>
+
+          <article class="property-card">
+            <div class="property-cue cue-hybrid" aria-hidden="true">
+              <div class="cue-arm cue-arm-vector">
+                <span class="cue-arm-label mono">vector</span>
+                <span class="cue-arm-sub">meaning</span>
+              </div>
+              <div class="cue-fuse">+</div>
+              <div class="cue-arm cue-arm-fts">
+                <span class="cue-arm-label mono">fts</span>
+                <span class="cue-arm-sub">exact text</span>
+              </div>
+              <div class="cue-arrow">&rarr;</div>
+              <div class="cue-fused mono">RRF</div>
+            </div>
+            <div class="property-body">
+              <div class="property-eyebrow mono">vector + full-text, RRF fusion</div>
+              <h3 class="property-title">Hybrid retrieval.</h3>
+              <p class="property-text">
+                Search combines meaning (vectors) with exact text (full-text). Two signals
+                fused together find what one would miss.
+              </p>
+            </div>
+          </article>
+
+        </div>
+      </section>
+
+      <!-- Live demo invite -->
+      <section class="home-section">
+        <div class="home-invite panel">
+          <div class="invite-body">
+            <span class="section-kicker">Live demo</span>
+            <h2 class="invite-title">Want to see it work?</h2>
+            <p class="invite-text">
+              Three short scenarios. Each proves one property is real, not just promised.
+            </p>
+            <button class="btn primary invite-cta" @click="showLanding()">
+              Try the live demo &rarr;
+            </button>
+          </div>
+          <div class="invite-side" aria-hidden="true">
+            <div class="invite-pill">A. Human correction wins</div>
+            <div class="invite-pill">B. Same query, different answer</div>
+            <div class="invite-pill">C. Refuse to pay twice</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <footer class="home-footer">
+        <p class="home-footer-line">
+          Built on Postgres + pgvector. Open source. ~few thousand LOC. Foundation for a
+          shared memory substrate.
+        </p>
+        <div class="home-footer-links">
+          <button class="link-btn" @click="showLanding()">Scenarios</button>
+          <span class="home-footer-sep">&middot;</span>
+          <a class="link-btn" href="#" rel="noopener">GitHub</a>
+          <span class="home-footer-sep">&middot;</span>
+          <button class="link-btn" @click="jumpToTab('dag')">Inspector</button>
+        </div>
+      </footer>
+
+    </main>
+
+    <!-- =========================== SCENARIO PICKER =========================== -->
+    <main class="content" x-show="view === 'scenarios'">
       <section class="landing">
+        <div class="landing-back-row">
+          <button class="back-link" @click="showHome()">&larr; Back to home</button>
+        </div>
         <div class="landing-hero">
           <h2 class="landing-title">A memory layer you can actually trust.</h2>
           <p class="landing-sub">
@@ -116,7 +358,7 @@
       </section>
     </main>
 
-    <main class="content" x-show="!landingMode">
+    <main class="content" x-show="view === 'app'">
 
       <!-- =========================== DAG VIEW =========================== -->
       <section x-show="tab === 'dag'" class="view">
