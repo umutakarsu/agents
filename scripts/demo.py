@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 
 from memlayer.connectors.local_files import read_dir
 from memlayer.db import connect
+from memlayer.decay import decay
 from memlayer.ingest import SourceItem, ingest
 from memlayer.retrieval import search
 from memlayer.writeback import history, recall, remember
@@ -62,11 +63,16 @@ def show_hits(hits, label: str) -> None:
 
 def show_history(workspace: str, entity_key: str) -> None:
     print(f"  audit trail for {entity_key} in {workspace!r}:")
-    for mid, content, stype, sid, conf, superseded, _ in history(
-        workspace, entity_key
-    ):
+    for row in history(workspace, entity_key):
+        mid, content, stype, sid, conf, superseded = row[:6]
+        tier = row[7] if len(row) > 7 else "semantic"
+        eff = row[9] if len(row) > 9 else None
         tag = f"-> #{superseded}" if superseded else "CURRENT"
-        print(f"    #{mid} {stype:6}:{sid:14} c={conf} {tag}: {content!r}")
+        eff_s = f" eff={eff:.2f}" if eff is not None else ""
+        print(
+            f"    #{mid} {stype:6}:{sid:14} c={conf} "
+            f"tier={tier:10}{eff_s} {tag}: {content!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +187,39 @@ def seed_acme() -> None:
     print(
         f"  embed_computed={s3.embeddings_computed}  (expected 0)\n"
         f"  embed_reused={s3.embeddings_reused}  (= chunks={s3.chunks})"
+    )
+
+    step(11, f"[{ws}] Phase 6: tiered memory + decay")
+    # A 'working' row is the lowest tier -- raw, ephemeral, evaporates fast.
+    # Useful for tool observations and scratch notes that should never
+    # outlive the session unless something reinforces them.
+    scratch_id, _ = remember(
+        ws, "scratch:debug",
+        "Build failed in step 3",
+        "agent", "ci",
+        confidence=0.8,
+        tier="working",
+    )
+    scratch = recall(ws, "scratch:debug")
+    print(
+        f"  wrote scratch row #{scratch_id} tier={scratch.tier!r} "
+        f"conf={scratch.confidence}"
+    )
+    # Show the decay curve without actually sleeping: with a 6h half-life
+    # the signal halves every 6 hours, and the 0.1 floor prevents it from
+    # going to zero. After ~36h we're well below the 0.15 eviction cutoff.
+    for sim_h in (7, 24, 36):
+        eff = decay(scratch.confidence, scratch.tier, sim_h * 3600)
+        print(f"  simulated effective_confidence after {sim_h:>2}h = {eff:.3f}")
+    sim_age = 36 * 3600
+    eff_after = decay(scratch.confidence, scratch.tier, sim_age)
+    print(
+        f"  after 36h ({eff_after:.3f}) is < 0.15 eviction cutoff -> "
+        f"scripts/evict_stale.py would delete this row"
+    )
+    print(
+        "  semantic/procedural rows are never auto-evicted; "
+        "working/episodic are."
     )
 
 
