@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1180" font-family="-apple-system, system-ui, sans-serif">
+  <defs>
+    <linearGradient id="gDone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2d5a3d"/>
+      <stop offset="100%" stop-color="#1e3f29"/>
+    </linearGradient>
+    <linearGradient id="gNext" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5a3e1c"/>
+      <stop offset="100%" stop-color="#3f2d14"/>
+    </linearGradient>
+    <linearGradient id="gNow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7a2e1a"/>
+      <stop offset="100%" stop-color="#4a1b10"/>
+    </linearGradient>
+    <linearGradient id="gMoat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4a2b6e"/>
+      <stop offset="100%" stop-color="#2d1a45"/>
+    </linearGradient>
+    <linearGradient id="gBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0e1218"/>
+      <stop offset="100%" stop-color="#0b0d12"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1500" height="1180" fill="url(#gBg)"/>
+
+  <!-- Title -->
+  <text x="750" y="48" text-anchor="middle" fill="#fff" font-size="26" font-weight="700">A shared memory for every AI tool in your company</text>
+  <text x="750" y="76" text-anchor="middle" fill="#94a3b8" font-size="14">Where we are  ·  What's next  ·  What makes us hard to copy</text>
+
+  <!-- Column headers -->
+  <rect x="30" y="110" width="460" height="38" rx="6" fill="rgba(76,154,122,0.18)" stroke="#4c9a7a"/>
+  <text x="50" y="135" fill="#6ee7b7" font-size="13" font-weight="700" letter-spacing="3">✓   DONE   —   ALREADY BUILT</text>
+
+  <rect x="520" y="110" width="460" height="38" rx="6" fill="rgba(184,138,55,0.18)" stroke="#b88a37"/>
+  <text x="540" y="135" fill="#fbbf24" font-size="13" font-weight="700" letter-spacing="3">→   NEXT   —   MAKE IT REAL</text>
+
+  <rect x="1010" y="110" width="460" height="38" rx="6" fill="rgba(167,139,250,0.18)" stroke="#a78bfa"/>
+  <text x="1030" y="135" fill="#c4b5fd" font-size="13" font-weight="700" letter-spacing="3">★   MOAT   —   HARD TO COPY</text>
+
+  <!-- ============== DONE COLUMN ============== -->
+  <g>
+    <rect x="30"  y="170" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="205" fill="#fff" font-size="15" font-weight="600">Write things down. They stay.</text>
+    <text x="50"  y="232" fill="#d1fae5" font-size="12.5" opacity="0.85">Every AI tool, every human writes here. Nothing disappears.</text>
+  </g>
+  <g>
+    <rect x="30"  y="266" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="301" fill="#fff" font-size="15" font-weight="600">Don't pay twice for the same content.</text>
+    <text x="50"  y="328" fill="#d1fae5" font-size="12.5" opacity="0.85">Re-ingest the same paragraph = zero new cost.</text>
+  </g>
+  <g>
+    <rect x="30"  y="362" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="397" fill="#fff" font-size="15" font-weight="600">Permissions you can't leak around.</text>
+    <text x="50"  y="424" fill="#d1fae5" font-size="12.5" opacity="0.85">Permission check happens before search ranks anything.</text>
+  </g>
+  <g>
+    <rect x="30"  y="458" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="493" fill="#fff" font-size="15" font-weight="600">Humans always win arguments with AI.</text>
+    <text x="50"  y="520" fill="#d1fae5" font-size="12.5" opacity="0.85">AI guesses can't overwrite a human's correction.</text>
+  </g>
+  <g>
+    <rect x="30"  y="554" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="589" fill="#fff" font-size="15" font-weight="600">Find info even when words don't match.</text>
+    <text x="50"  y="616" fill="#d1fae5" font-size="12.5" opacity="0.85">Search by meaning AND exact text, fused together.</text>
+  </g>
+  <g>
+    <rect x="30"  y="650" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="685" fill="#fff" font-size="15" font-weight="600">Old wrong guesses forget themselves.</text>
+    <text x="50"  y="712" fill="#d1fae5" font-size="12.5" opacity="0.85">Stale memory fades. Reinforced memory stays sharp.</text>
+  </g>
+  <g>
+    <rect x="30"  y="746" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="781" fill="#fff" font-size="15" font-weight="600">Strip secrets at the door.</text>
+    <text x="50"  y="808" fill="#d1fae5" font-size="12.5" opacity="0.85">API keys, passwords, JWTs never get stored.</text>
+  </g>
+  <g>
+    <rect x="30"  y="842" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="877" fill="#fff" font-size="15" font-weight="600">Any AI tool plugs in via one standard.</text>
+    <text x="50"  y="904" fill="#d1fae5" font-size="12.5" opacity="0.85">MCP — Claude Code, Cursor, anything.</text>
+  </g>
+  <g>
+    <rect x="30"  y="938" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="973" fill="#fff" font-size="15" font-weight="600">Web dashboard to see it work.</text>
+    <text x="50"  y="1000" fill="#d1fae5" font-size="12.5" opacity="0.85">Landing, demos, pitch deck — one URL.</text>
+  </g>
+  <g>
+    <rect x="30"  y="1034" width="460" height="86" rx="8" fill="url(#gDone)" stroke="rgba(110,231,183,0.3)"/>
+    <text x="50"  y="1069" fill="#fff" font-size="15" font-weight="600">Security audited. Holes patched.</text>
+    <text x="50"  y="1096" fill="#d1fae5" font-size="12.5" opacity="0.85">3 critical + 5 high-severity bugs found and fixed.</text>
+  </g>
+
+  <!-- ============== NEXT COLUMN ============== -->
+  <!-- DOING NOW (gold, larger) -->
+  <g>
+    <rect x="520" y="170" width="460" height="118" rx="8" fill="url(#gNow)" stroke="#f0a83a" stroke-width="2.5"/>
+    <text x="540" y="200" fill="#f0a83a" font-size="10" font-weight="700" letter-spacing="3">★  DOING NOW   ·   BLOCKING</text>
+    <text x="540" y="232" fill="#fff" font-size="17" font-weight="600">Make tools log in for real.</text>
+    <text x="540" y="258" fill="#fed7aa" font-size="12.5" opacity="0.9">Today anyone hitting our API can claim to be anyone.</text>
+    <text x="540" y="276" fill="#fed7aa" font-size="12.5" opacity="0.9">Add real authentication — unlocks everything else.</text>
+  </g>
+  <g>
+    <rect x="520" y="298" width="460" height="86" rx="8" fill="url(#gNext)" stroke="rgba(251,191,36,0.28)"/>
+    <text x="540" y="333" fill="#fff" font-size="15" font-weight="600">Plug into Slack, Notion, Linear.</text>
+    <text x="540" y="360" fill="#fef3c7" font-size="12.5" opacity="0.85">Real tools your team uses, not toy demo data.</text>
+  </g>
+  <g>
+    <rect x="520" y="394" width="460" height="86" rx="8" fill="url(#gNext)" stroke="rgba(251,191,36,0.28)"/>
+    <text x="540" y="429" fill="#fff" font-size="15" font-weight="600">Run on autopilot — no babysitting.</text>
+    <text x="540" y="456" fill="#fef3c7" font-size="12.5" opacity="0.85">Scheduled pulls. Failure alerts. Connector health visible.</text>
+  </g>
+  <g>
+    <rect x="520" y="490" width="460" height="86" rx="8" fill="url(#gNext)" stroke="rgba(251,191,36,0.28)"/>
+    <text x="540" y="525" fill="#fff" font-size="15" font-weight="600">Two companies' data never mix.</text>
+    <text x="540" y="552" fill="#fef3c7" font-size="12.5" opacity="0.85">Production-grade tenant isolation auditors will sign off on.</text>
+  </g>
+  <g>
+    <rect x="520" y="586" width="460" height="86" rx="8" fill="url(#gNext)" stroke="rgba(251,191,36,0.28)"/>
+    <text x="540" y="621" fill="#fff" font-size="15" font-weight="600">Show what's flowing in, live.</text>
+    <text x="540" y="648" fill="#fef3c7" font-size="12.5" opacity="0.85">Real-time view: what's ingesting, what failed, what got scrubbed.</text>
+  </g>
+
+  <!-- ============== MOAT COLUMN ============== -->
+  <g>
+    <rect x="1010" y="170" width="460" height="118" rx="8" fill="url(#gMoat)" stroke="rgba(196,181,253,0.32)"/>
+    <text x="1030" y="200" fill="#c4b5fd" font-size="10" font-weight="700" letter-spacing="3">#1   ·   IDENTITY</text>
+    <text x="1030" y="232" fill="#fff" font-size="16" font-weight="600">Know "Ali in Slack" = "ali@acme.com"</text>
+    <text x="1030" y="258" fill="#ede9fe" font-size="12.5" opacity="0.9">Same person across all sources. Without making</text>
+    <text x="1030" y="276" fill="#ede9fe" font-size="12.5" opacity="0.9">mistakes that leak one person's data to another.</text>
+  </g>
+  <g>
+    <rect x="1010" y="298" width="460" height="118" rx="8" fill="url(#gMoat)" stroke="rgba(196,181,253,0.32)"/>
+    <text x="1030" y="328" fill="#c4b5fd" font-size="10" font-weight="700" letter-spacing="3">#2   ·   GOVERNANCE</text>
+    <text x="1030" y="360" fill="#fff" font-size="16" font-weight="600">Model who can override whom.</text>
+    <text x="1030" y="386" fill="#ede9fe" font-size="12.5" opacity="0.9">When two humans disagree, system models role, context,</text>
+    <text x="1030" y="404" fill="#ede9fe" font-size="12.5" opacity="0.9">policy — not just "latest wins" or "human always right".</text>
+  </g>
+  <g>
+    <rect x="1010" y="426" width="460" height="118" rx="8" fill="url(#gMoat)" stroke="rgba(196,181,253,0.32)"/>
+    <text x="1030" y="456" fill="#c4b5fd" font-size="10" font-weight="700" letter-spacing="3">#3   ·   COMPRESSION</text>
+    <text x="1030" y="488" fill="#fff" font-size="16" font-weight="600">1,000 messages → 1 summary, with receipts.</text>
+    <text x="1030" y="514" fill="#ede9fe" font-size="12.5" opacity="0.9">Every claim in the summary traceable to its source.</text>
+    <text x="1030" y="532" fill="#ede9fe" font-size="12.5" opacity="0.9">The hard part: don't make things up.</text>
+  </g>
+  <g>
+    <rect x="1010" y="554" width="460" height="118" rx="8" fill="url(#gMoat)" stroke="rgba(196,181,253,0.32)"/>
+    <text x="1030" y="584" fill="#c4b5fd" font-size="10" font-weight="700" letter-spacing="3">#4   ·   FEDERATED</text>
+    <text x="1030" y="616" fill="#fff" font-size="16" font-weight="600">Learn across companies — without leakage.</text>
+    <text x="1030" y="642" fill="#ede9fe" font-size="12.5" opacity="0.9">Platform gets smarter from every workspace, but</text>
+    <text x="1030" y="660" fill="#ede9fe" font-size="12.5" opacity="0.9">no workspace's content ever bleeds into another.</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="750" y="1158" text-anchor="middle" fill="#475569" font-size="12">Green = shipped   ·   Gold = doing now   ·   Amber = engineering   ·   Purple = the four hard problems</text>
+</svg>
