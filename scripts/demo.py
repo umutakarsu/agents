@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from memlayer.connectors.local_files import read_dir
 from memlayer.db import connect
 from memlayer.decay import decay
+from memlayer.identity import add_alias, list_proposals
 from memlayer.ingest import SourceItem, ingest
 from memlayer.retrieval import search
 from memlayer.writeback import history, recall, remember
@@ -45,6 +46,20 @@ def reset(workspaces: tuple[str, ...]) -> None:
             cur.execute("DELETE FROM memory WHERE workspace = %s", (ws,))
             cur.execute("DELETE FROM chunk_acl WHERE workspace = %s", (ws,))
             cur.execute("DELETE FROM raw_events WHERE workspace = %s", (ws,))
+            # Phase 7: identity tables. ON DELETE CASCADE on the FKs in
+            # identity_alias / merge_proposal / merge_denylist means
+            # deleting identity rows clears the dependents too; merge log
+            # is workspace-scoped on its own.
+            cur.execute(
+                "DELETE FROM merge_proposal WHERE workspace = %s", (ws,)
+            )
+            cur.execute(
+                "DELETE FROM merge_denylist WHERE workspace = %s", (ws,)
+            )
+            cur.execute(
+                "DELETE FROM identity_merge_log WHERE workspace = %s", (ws,)
+            )
+            cur.execute("DELETE FROM identity WHERE workspace = %s", (ws,))
         conn.commit()
 
 
@@ -222,6 +237,56 @@ def seed_acme() -> None:
         "working/episodic are."
     )
 
+    step(12, f"[{ws}] Phase 7: identity unification (cross-source aliases)")
+    # person:ali -- three aliases across slack/gmail/github. Same handle/email
+    # local-part 'ali' across sources -> handle-similarity fires.
+    add_alias(ws, "slack", "@ali", display_name="Ali Karsu",
+              entity_key="person:ali", canonical_name="Ali Karsu", kind="person")
+    add_alias(ws, "gmail", "ali@acme.com", display_name="Ali Karsu",
+              entity_key="person:ali", canonical_name="Ali Karsu", kind="person")
+    add_alias(ws, "github", "ali-acme", display_name="Ali Karsu",
+              entity_key="person:ali", canonical_name="Ali Karsu", kind="person")
+    # person:bjorn -- three sources: slack/gmail/notion.
+    add_alias(ws, "slack", "@bjorn", display_name="Bjorn Andersen",
+              entity_key="person:bjorn", canonical_name="Bjorn Andersen", kind="person")
+    add_alias(ws, "gmail", "bjorn@acme.com", display_name="Bjorn Andersen",
+              entity_key="person:bjorn", canonical_name="Bjorn Andersen", kind="person")
+    add_alias(ws, "notion", "BjornDesign", display_name="Bjorn Andersen",
+              entity_key="person:bjorn", canonical_name="Bjorn Andersen", kind="person")
+    # person:chen -- single source. Unresolved, no cross-source coverage.
+    add_alias(ws, "gmail", "chen@acme.com", display_name="Chen Wei",
+              entity_key="person:chen", canonical_name="Chen Wei", kind="person")
+    print(
+        "  seeded aliases for person:ali (slack/gmail/github), "
+        "person:bjorn (slack/gmail/notion), person:chen (gmail only)"
+    )
+
+    # Adversarial case: a separate identity that LOOKS like Ali Karsu but
+    # isn't. Very similar display name, similar handle, but different
+    # email entirely (partner domain, not @acme.com). Name + handle
+    # similarity both fire strongly; exact_email does not. This should
+    # produce a proposal (~0.85) -- enough for a human to review, not
+    # enough to auto-merge.
+    remember(
+        ws, "person:ali-karsi", "Ali Karsi is the new sales engineer.",
+        "human", "hr", confidence=0.9,
+    )
+    add_alias(ws, "gmail", "ali@partner.example.com",
+              display_name="Ali Karsi",
+              entity_key="person:ali-karsi", canonical_name="Ali Karsi", kind="person")
+    add_alias(ws, "slack", "@ali2", display_name="Ali Karsi",
+              entity_key="person:ali-karsi", canonical_name="Ali Karsi", kind="person")
+    pending = list_proposals(ws, status="pending")
+    print(
+        f"  adversarial: 'Ali Karsu' vs 'Ali Karsi' -> "
+        f"{len(pending)} pending proposal(s) for human review"
+    )
+    for p in pending:
+        a = p["identity_a"]["canonical_name"]
+        b = p["identity_b"]["canonical_name"]
+        c = p["confidence"]
+        print(f"    proposal: {a!r} vs {b!r}  confidence={c:.2f}")
+
 
 # ---------------------------------------------------------------------------
 # Workspace 2: personal -- single-user knowledge base, synthesized notes
@@ -313,6 +378,14 @@ def seed_personal() -> None:
     show_hits(hits, "group:all")
     kinds = {h.kind for h in hits}
     print(f"  kinds present: {sorted(kinds)}  (expect both 'chunk' and 'memory')")
+
+    step(5, f"[{ws}] Phase 7: light identity seeding")
+    # Single-user knowledge base: one canonical identity, one alias each.
+    add_alias(ws, "journal", "self", display_name="Umut",
+              entity_key="person:umut", canonical_name="Umut", kind="person")
+    add_alias(ws, "github", "umutakarsu", display_name="Umut Akarsu",
+              entity_key="person:umut", canonical_name="Umut", kind="person")
+    print("  seeded person:umut with journal/github aliases")
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +486,17 @@ def seed_sales() -> None:
     show_hits(hits, "group:all")
     kinds = {h.kind for h in hits}
     print(f"  kinds present: {sorted(kinds)}  (expect both 'chunk' and 'memory')")
+
+    step(5, f"[{ws}] Phase 7: light identity seeding for accounts")
+    # CRM workspace: accounts as identities, one alias per source.
+    add_alias(ws, "crm", "acme-corp", display_name="Acme Corp",
+              entity_key="account:acme-corp", canonical_name="Acme Corp", kind="project")
+    add_alias(ws, "gmail", "billing@acme-corp.example.com",
+              display_name="Acme Corp",
+              entity_key="account:acme-corp", canonical_name="Acme Corp", kind="project")
+    add_alias(ws, "crm", "globex-inc", display_name="Globex",
+              entity_key="account:globex", canonical_name="Globex", kind="project")
+    print("  seeded account:acme-corp (crm/gmail) and account:globex (crm)")
 
 
 def main() -> None:

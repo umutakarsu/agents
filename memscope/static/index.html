@@ -20,6 +20,7 @@
         <button class="tab" role="tab" :class="{ active: tab === 'dag' }" @click="tab = 'dag'">DAG</button>
         <button class="tab" role="tab" :class="{ active: tab === 'search' }" @click="tab = 'search'">Search</button>
         <button class="tab" role="tab" :class="{ active: tab === 'pipeline' }" @click="tab = 'pipeline'">Pipeline</button>
+        <button class="tab" role="tab" :class="{ active: tab === 'identities' }" @click="tab = 'identities'">Identities</button>
       </nav>
       <div class="topbar-right">
         <button class="topbar-home" x-show="view !== 'home'" @click="showHome()" aria-label="Back to home" title="Back to home">
@@ -343,6 +344,24 @@
             <p class="scenario-sub">
               Every chunk of content is keyed by a hash. Same content =
               zero cost to re-ingest.
+            </p>
+            <div class="scenario-cta">Run scenario &rarr;</div>
+          </button>
+
+          <!-- Scenario D: identities -->
+          <button type="button" class="scenario-card" @click="runScenarioD()">
+            <div class="scenario-visual visual-identities" aria-hidden="true">
+              <div class="vis-id-hub">Ali&nbsp;Karsu</div>
+              <div class="vis-id-spokes">
+                <span class="vis-id-chip src-slack">@ali <span class="vis-id-src">slack</span></span>
+                <span class="vis-id-chip src-gmail">ali@acme <span class="vis-id-src">gmail</span></span>
+                <span class="vis-id-chip src-github">ali-acme <span class="vis-id-src">github</span></span>
+              </div>
+            </div>
+            <h3 class="scenario-title">Stitch the same person across sources &mdash; without bad merges</h3>
+            <p class="scenario-sub">
+              Slack, Gmail, and GitHub all see "Ali" differently. Memlayer
+              unifies them &mdash; with human review for risky merges.
             </p>
             <div class="scenario-cta">Run scenario &rarr;</div>
           </button>
@@ -871,6 +890,260 @@
 
         <template x-if="!stats && !pipelineError && !pipelineWorkspace">
           <p class="empty">pick a workspace to see pipeline stats</p>
+        </template>
+      </section>
+
+      <!-- ========================= IDENTITIES VIEW ========================= -->
+      <section x-show="tab === 'identities'" class="view">
+
+        <!-- One-sentence banner -->
+        <div class="view-banner" x-show="!identitiesBannerDismissed">
+          <span class="view-banner-icon">&#9432;</span>
+          <span class="view-banner-text">
+            One real person can show up as <span class="mono">@ali</span> in Slack,
+            <span class="mono">ali@acme.com</span> in Gmail, and <span class="mono">ali-acme</span> on GitHub.
+            This view unifies cross-source aliases &mdash; with a human-in-the-loop review
+            for any merge the system isn&rsquo;t confident enough to do on its own.
+          </span>
+          <button class="view-banner-close" @click="identitiesBannerDismissed = true" aria-label="Dismiss">&times;</button>
+        </div>
+
+        <!-- Story banner -->
+        <div class="story-banner" x-show="identitiesStoryActive">
+          <div class="story-banner-head">
+            <span class="story-badge">SCENARIO</span>
+            <span class="story-title">Stitch the same person across sources</span>
+            <button class="view-banner-close" @click="identitiesStoryActive = false" aria-label="Dismiss">&times;</button>
+          </div>
+          <p class="story-body">
+            Three sources see Ali Karsu differently: <code class="mono">@ali</code> in Slack,
+            <code class="mono">ali@acme.com</code> in Gmail, and <code class="mono">ali-acme</code> on GitHub.
+            The system unifies these into one canonical identity. Note the pending
+            <strong>merge proposal</strong> below &mdash; a similar-looking name
+            (<em>Ali Karsi</em>) is similar enough to surface for review, but not similar enough
+            to auto-merge. A bad merge is a security incident, so the system errs on caution.
+          </p>
+        </div>
+
+        <div class="view-header">
+          <div class="view-title-block">
+            <h2 class="view-title">Identities</h2>
+            <p class="view-subtitle">Cross-source unification. Confidence-scored merges, with human-in-the-loop review for risky ones.</p>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <div class="field">
+            <label>
+              Team / project
+              <span class="tip" data-tip="A workspace is a tenant boundary. Identities are partitioned by workspace.">
+                <span class="tip-paren">(workspace)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+            </label>
+            <select x-model="identitiesWorkspace" @change="loadIdentities()">
+              <option value="">(pick one)</option>
+              <template x-for="w in wsList" :key="w">
+                <option :value="w" x-text="w"></option>
+              </template>
+            </select>
+          </div>
+          <div class="field">
+            <label>
+              Who's asking
+              <span class="tip" data-tip="Principals are the identities you're asking on behalf of. An identity is only listed if at least one of its memory rows is visible to you.">
+                <span class="tip-paren">(principals)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+              <span class="field-hint">comma-separated</span>
+            </label>
+            <input type="text" x-model="identitiesPrincipals" placeholder="group:all"
+                   @change="loadIdentities()" />
+          </div>
+          <button class="btn ghost" @click="loadIdentities()" :disabled="!identitiesWorkspace">refresh</button>
+        </div>
+
+        <div x-show="identitiesError" class="error" x-text="identitiesError"></div>
+
+        <!-- Pending merge proposals panel -->
+        <div class="proposals-panel" x-show="mergeProposals.length > 0">
+          <div class="proposals-head">
+            <span class="proposals-badge">REVIEW</span>
+            <span class="proposals-title" x-text="`${mergeProposals.length} pending merge proposal${mergeProposals.length === 1 ? '' : 's'}`"></span>
+            <span class="proposals-sub">A bad merge can leak restricted content. Approve only if these really are the same person.</span>
+          </div>
+          <template x-for="p in mergeProposals" :key="p.id">
+            <div class="proposal-card panel">
+              <div class="proposal-pair">
+                <div class="proposal-ident">
+                  <div class="proposal-ident-name" x-text="p.identity_a.canonical_name"></div>
+                  <div class="proposal-ident-kind">
+                    <span class="chip chip-kind-memory" x-text="p.identity_a.kind"></span>
+                    <span class="mono proposal-ident-key" x-text="p.identity_a.entity_key"></span>
+                  </div>
+                  <div class="proposal-aliases">
+                    <template x-for="a in p.identity_a.aliases" :key="a.id">
+                      <span class="alias-chip" :class="`src-${a.source}`">
+                        <span class="alias-src" x-text="a.source"></span>
+                        <span class="alias-ext mono" x-text="a.external_id"></span>
+                      </span>
+                    </template>
+                  </div>
+                </div>
+                <div class="proposal-versus">
+                  <div class="proposal-conf-badge">
+                    <span x-text="(p.confidence * 100).toFixed(0) + '%'"></span>
+                    <span class="proposal-conf-label">match</span>
+                  </div>
+                  <div class="proposal-versus-line"></div>
+                </div>
+                <div class="proposal-ident">
+                  <div class="proposal-ident-name" x-text="p.identity_b.canonical_name"></div>
+                  <div class="proposal-ident-kind">
+                    <span class="chip chip-kind-memory" x-text="p.identity_b.kind"></span>
+                    <span class="mono proposal-ident-key" x-text="p.identity_b.entity_key"></span>
+                  </div>
+                  <div class="proposal-aliases">
+                    <template x-for="a in p.identity_b.aliases" :key="a.id">
+                      <span class="alias-chip" :class="`src-${a.source}`">
+                        <span class="alias-src" x-text="a.source"></span>
+                        <span class="alias-ext mono" x-text="a.external_id"></span>
+                      </span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <div class="proposal-signals">
+                <div class="proposal-signals-head">Signals fired</div>
+                <div class="proposal-signals-list">
+                  <template x-for="name in (p.signals._fired || [])" :key="name">
+                    <div class="signal-row">
+                      <span class="signal-name mono" x-text="name"></span>
+                      <div class="signal-bar">
+                        <div class="signal-bar-fill"
+                             :style="`width: ${Math.round((p.signals[name] || 0) * 100)}%`"></div>
+                      </div>
+                      <span class="signal-val mono" x-text="((p.signals[name] || 0) * 100).toFixed(0) + '%'"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <div class="proposal-actions">
+                <button class="btn primary" @click="approveProposal(p.id)" :disabled="proposalBusy === p.id">
+                  Approve merge
+                </button>
+                <button class="btn ghost" @click="rejectProposal(p.id)" :disabled="proposalBusy === p.id">
+                  Reject (don&rsquo;t propose again)
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Identity list + details -->
+        <template x-if="identitiesList.length > 0">
+          <div class="identities-layout">
+
+            <div class="identities-list panel">
+              <div class="card-title">
+                <span x-text="`${identitiesList.length} identit${identitiesList.length === 1 ? 'y' : 'ies'}`"></span>
+              </div>
+              <template x-for="ident in identitiesList" :key="ident.id">
+                <button type="button"
+                        class="identity-row"
+                        :class="{ active: selectedIdentity && selectedIdentity.id === ident.id }"
+                        @click="selectIdentity(ident.id)">
+                  <div class="identity-row-head">
+                    <span class="identity-name" x-text="ident.canonical_name"></span>
+                    <span class="chip" :class="`chip-kind-${ident.kind}`" x-text="ident.kind"></span>
+                  </div>
+                  <div class="identity-row-aliases">
+                    <template x-for="a in ident.aliases" :key="a.id">
+                      <span class="alias-chip mini" :class="`src-${a.source}`">
+                        <span class="alias-src" x-text="a.source"></span>
+                      </span>
+                    </template>
+                    <span x-show="ident.alias_count === 0" class="identity-no-aliases">(no aliases yet)</span>
+                  </div>
+                </button>
+              </template>
+            </div>
+
+            <aside class="identity-detail panel">
+              <template x-if="selectedIdentity">
+                <div>
+                  <div class="identity-detail-head">
+                    <h3 class="identity-detail-name" x-text="selectedIdentity.canonical_name"></h3>
+                    <span class="chip" :class="`chip-kind-${selectedIdentity.kind}`" x-text="selectedIdentity.kind"></span>
+                  </div>
+                  <div class="identity-detail-key mono" x-text="selectedIdentity.entity_key"></div>
+
+                  <!-- Cluster hub-and-spoke visualization -->
+                  <div class="cluster-graph" x-html="renderClusterGraph()"></div>
+
+                  <div class="identity-detail-section">
+                    <div class="identity-detail-section-title">Aliases</div>
+                    <template x-for="a in selectedIdentity.aliases" :key="a.id">
+                      <div class="alias-detail">
+                        <span class="alias-chip" :class="`src-${a.source}`">
+                          <span class="alias-src" x-text="a.source"></span>
+                          <span class="alias-ext mono" x-text="a.external_id"></span>
+                        </span>
+                        <span class="alias-display" x-show="a.display_name" x-text="a.display_name"></span>
+                        <span class="alias-meta mono" x-text="`conf=${a.confidence} ev=${a.evidence_count}`"></span>
+                      </div>
+                    </template>
+                    <template x-if="selectedIdentity.aliases.length === 0">
+                      <p class="empty inline">no aliases recorded yet</p>
+                    </template>
+                  </div>
+
+                  <div class="identity-detail-section" x-show="identityDetails && identityDetails.current_memory">
+                    <div class="identity-detail-section-title">Current memory</div>
+                    <template x-if="identityDetails && identityDetails.current_memory">
+                      <blockquote class="mono" x-text="identityDetails.current_memory.content"></blockquote>
+                    </template>
+                  </div>
+
+                  <div class="identity-detail-section" x-show="identityDetails && identityDetails.history.length > 0">
+                    <div class="identity-detail-section-title">
+                      History
+                      <span class="metric-paren" x-text="`(${identityDetails ? identityDetails.history.length : 0} version${identityDetails && identityDetails.history.length === 1 ? '' : 's'})`"></span>
+                    </div>
+                    <template x-if="identityDetails">
+                      <ul class="identity-history">
+                        <template x-for="h in identityDetails.history" :key="h.id">
+                          <li class="identity-history-row">
+                            <span class="chip" :class="`chip-${h.source_type}`" x-text="h.source_type.toUpperCase()"></span>
+                            <span class="mono" x-text="`#${h.id}`"></span>
+                            <span class="identity-history-content" x-text="h.content"></span>
+                            <span class="mono identity-history-conf" x-text="`${Math.round(h.confidence * 100)}%`"></span>
+                          </li>
+                        </template>
+                      </ul>
+                    </template>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!selectedIdentity">
+                <div class="hint-card">
+                  <div class="hint-title">Pick an identity</div>
+                  <p>Click any row on the left to see its aliases across sources, its
+                     cluster graph, and the memory rows tied to it.</p>
+                </div>
+              </template>
+            </aside>
+          </div>
+        </template>
+
+        <template x-if="identitiesList.length === 0 && identitiesWorkspace && !identitiesError">
+          <p class="empty">no identities in this workspace yet</p>
+        </template>
+
+        <template x-if="!identitiesWorkspace">
+          <p class="empty">pick a workspace to see its identities</p>
         </template>
       </section>
 

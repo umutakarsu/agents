@@ -73,6 +73,21 @@ function memscope() {
     ingestLoading: false,
     ingestResult: null,
 
+    // ---------- Identities view (Phase 7) ----------
+    // Identities are cross-source unifications: one canonical identity
+    // gathers per-source aliases. ACL pre-filter is applied so an
+    // identity whose memory rows you can't see is not enumerated.
+    identitiesWorkspace: '',
+    identitiesPrincipals: 'group:all',
+    identitiesList: [],
+    identitiesError: '',
+    identitiesBannerDismissed: false,
+    identitiesStoryActive: false,
+    selectedIdentity: null,
+    identityDetails: null,         // /api/identity/{id}
+    mergeProposals: [],
+    proposalBusy: null,            // proposal id while approve/reject is in-flight
+
     // =====================================================
     // init: pull workspace list once, share across all views
     // =====================================================
@@ -170,6 +185,24 @@ function memscope() {
       this.searchPrincipals = 'group:exec';
       this.searchStoryStage = 2;
       await this.runSearch();
+    },
+
+    // ----- Scenario D: identities -- stitch the same person across sources -----
+    async runScenarioD() {
+      this.tab = 'identities';
+      this.identitiesWorkspace = 'acme';
+      this.identitiesPrincipals = 'group:all';
+      this.identitiesStoryActive = true;
+      this.identitiesBannerDismissed = true;
+      this.landingMode = false;
+      await this.loadIdentities();
+      // Auto-select Ali Karsu so the cross-source aliases are visible.
+      const ali = this.identitiesList.find(
+        i => i.entity_key === 'person:ali'
+      );
+      if (ali) {
+        await this.selectIdentity(ali.id);
+      }
     },
 
     // ----- Scenario C: refuse to pay twice (Pipeline, acme, sample_docs) -----
@@ -330,6 +363,165 @@ function memscope() {
       } finally {
         this.ingestLoading = false;
       }
+    },
+
+    // =====================================================
+    // Identities view actions (Phase 7)
+    // =====================================================
+    get identitiesPrincipalsCsv() {
+      const v = (this.identitiesPrincipals || '').split(',')
+        .map(s => s.trim()).filter(Boolean).join(',');
+      return v || 'group:all';
+    },
+
+    async loadIdentities() {
+      this.identitiesError = '';
+      this.identitiesList = [];
+      this.mergeProposals = [];
+      this.selectedIdentity = null;
+      this.identityDetails = null;
+      if (!this.identitiesWorkspace) return;
+      try {
+        const [list, props] = await Promise.all([
+          fetch(
+            `/api/identities?workspace=${encodeURIComponent(this.identitiesWorkspace)}`
+            + `&principals=${encodeURIComponent(this.identitiesPrincipalsCsv)}`
+          ).then(this._json),
+          fetch(
+            `/api/merge_proposals?workspace=${encodeURIComponent(this.identitiesWorkspace)}`
+          ).then(this._json),
+        ]);
+        this.identitiesList = list.identities || [];
+        this.mergeProposals = props.proposals || [];
+      } catch (e) {
+        this.identitiesError = `loading identities: ${e.message}`;
+      }
+    },
+
+    async selectIdentity(id) {
+      const ident = this.identitiesList.find(i => i.id === id);
+      this.selectedIdentity = ident || null;
+      this.identityDetails = null;
+      if (!ident) return;
+      try {
+        const r = await fetch(
+          `/api/identity/${ident.id}`
+          + `?principals=${encodeURIComponent(this.identitiesPrincipalsCsv)}`
+        ).then(this._json);
+        this.identityDetails = r;
+      } catch (e) {
+        // Details are non-critical -- still keep the basic identity row.
+        this.identitiesError = `loading identity details: ${e.message}`;
+      }
+    },
+
+    async approveProposal(id) {
+      this.proposalBusy = id;
+      try {
+        await fetch(`/api/merge_proposals/${id}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ by: 'memscope-ui' }),
+        }).then(this._json);
+        // Re-fetch list and proposals so the merged identity disappears.
+        await this.loadIdentities();
+      } catch (e) {
+        this.identitiesError = `approve failed: ${e.message}`;
+      } finally {
+        this.proposalBusy = null;
+      }
+    },
+
+    async rejectProposal(id) {
+      const reason = window.prompt(
+        'Why reject this merge? (kept in the denylist so we won\'t propose it again)',
+        'not the same person'
+      );
+      if (reason === null) return;  // cancelled
+      this.proposalBusy = id;
+      try {
+        await fetch(`/api/merge_proposals/${id}/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason, by: 'memscope-ui' }),
+        }).then(this._json);
+        await this.loadIdentities();
+      } catch (e) {
+        this.identitiesError = `reject failed: ${e.message}`;
+      } finally {
+        this.proposalBusy = null;
+      }
+    },
+
+    // Hub-and-spoke SVG: the identity is a center node, each alias is a
+    // leaf colored by source. Visually demonstrates "one identity, many
+    // sources" without needing a real graph layout library.
+    renderClusterGraph() {
+      const ident = this.selectedIdentity;
+      if (!ident || !ident.aliases || ident.aliases.length === 0) return '';
+      const W = 420, H = 220;
+      const cx = W / 2, cy = H / 2;
+      const hubR = 38;
+      const leafR = 26;
+      const orbit = 75;
+      const n = ident.aliases.length;
+      const esc = s => String(s).replace(/[&<>"']/g,
+        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+      // Source color palette: matches the alias-chip CSS classes.
+      const srcColor = src => ({
+        slack:  '#7c6cff',
+        gmail:  '#ef6b73',
+        github: '#8c95a4',
+        notion: '#e3e7ee',
+        crm:    '#5ea8ff',
+        journal:'#4cc38a',
+      })[src] || '#aab2bf';
+
+      const edges = ident.aliases.map((a, i) => {
+        const angle = (2 * Math.PI * i) / n - Math.PI / 2;
+        const lx = cx + Math.cos(angle) * orbit;
+        const ly = cy + Math.sin(angle) * orbit;
+        return `<line x1="${cx}" y1="${cy}" x2="${lx}" y2="${ly}"
+                      stroke="#2a313c" stroke-width="1.5" />`;
+      }).join('');
+
+      const leaves = ident.aliases.map((a, i) => {
+        const angle = (2 * Math.PI * i) / n - Math.PI / 2;
+        const lx = cx + Math.cos(angle) * orbit;
+        const ly = cy + Math.sin(angle) * orbit;
+        const color = srcColor(a.source);
+        const label = esc(a.external_id.length > 14
+          ? a.external_id.slice(0, 13) + '…'
+          : a.external_id);
+        const srcLabel = esc(a.source.toUpperCase());
+        return `
+          <g>
+            <circle cx="${lx}" cy="${ly}" r="${leafR}"
+                    fill="#161c25" stroke="${color}" stroke-width="2" />
+            <text x="${lx}" y="${ly - 2}" text-anchor="middle"
+                  font-size="9" font-weight="700" fill="${color}"
+                  letter-spacing="0.06em">${srcLabel}</text>
+            <text x="${lx}" y="${ly + 10}" text-anchor="middle"
+                  font-size="8.5" fill="#aab2bf"
+                  font-family="ui-monospace,Menlo,monospace">${label}</text>
+          </g>`;
+      }).join('');
+
+      const hubLabel = esc(ident.canonical_name.length > 14
+        ? ident.canonical_name.slice(0, 13) + '…'
+        : ident.canonical_name);
+
+      return `
+        <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}"
+             xmlns="http://www.w3.org/2000/svg" class="cluster-svg">
+          ${edges}
+          <circle cx="${cx}" cy="${cy}" r="${hubR}"
+                  fill="#1b1840" stroke="#7c6cff" stroke-width="2" />
+          <text x="${cx}" y="${cy + 4}" text-anchor="middle"
+                font-size="11" font-weight="700" fill="#e3e7ee">${hubLabel}</text>
+          ${leaves}
+        </svg>`;
     },
 
     // =====================================================

@@ -127,3 +127,89 @@ def pitch() -> FileResponse:
 @app.get("/board")
 def board() -> FileResponse:
     return FileResponse(str(STATIC / "board.html"))
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: identity unification endpoints.
+#
+# All read endpoints take ``principals`` like the other views so the same
+# ACL pre-filter is enforced (an identity is only returned if at least one
+# of its memory rows is visible to the caller, or it has no memory rows at
+# all). The mutating endpoints (approve / reject) currently trust the
+# caller-supplied ``by`` string -- the auth track will replace that with
+# the session identity once it lands.
+# ---------------------------------------------------------------------------
+
+from memscope.views import (  # noqa: E402  -- intentional append-at-end
+    cluster_graph_view,
+    identities_for_workspace,
+    identity_details,
+    merge_proposals_for_workspace,
+)
+from memlayer.identity import approve as identity_approve  # noqa: E402
+from memlayer.identity import reject as identity_reject  # noqa: E402
+
+
+class ApproveProposalRequest(BaseModel):
+    by: str
+
+
+class RejectProposalRequest(BaseModel):
+    reason: str
+    by: str
+
+
+@app.get("/api/identities")
+def get_identities(workspace: str, principals: str) -> dict:
+    principals_list = _parse_principals(principals)
+    return {
+        "workspace": workspace,
+        "identities": identities_for_workspace(workspace, principals_list),
+    }
+
+
+@app.get("/api/identity/{identity_id}")
+def get_identity_endpoint(identity_id: int, principals: str) -> dict:
+    principals_list = _parse_principals(principals)
+    details = identity_details(identity_id, principals_list)
+    if details is None:
+        raise HTTPException(status_code=404, detail="identity not found")
+    return details
+
+
+@app.get("/api/identity/{identity_id}/cluster_graph")
+def get_cluster_graph(identity_id: int, principals: str) -> dict:
+    # principals is currently unused for the cluster graph -- the alias /
+    # source-color information isn't access-controlled, only the *content*
+    # is. We accept the param so the front-end can call the same shape.
+    _ = _parse_principals(principals)
+    graph = cluster_graph_view(identity_id)
+    if graph is None:
+        raise HTTPException(status_code=404, detail="identity not found")
+    return graph
+
+
+@app.get("/api/merge_proposals")
+def get_merge_proposals(workspace: str) -> dict:
+    return {
+        "workspace": workspace,
+        "proposals": merge_proposals_for_workspace(workspace),
+    }
+
+
+@app.post("/api/merge_proposals/{proposal_id}/approve")
+def post_approve_merge(proposal_id: int, req: ApproveProposalRequest) -> dict:
+    try:
+        winner_id = identity_approve(proposal_id, by=req.by)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "winner_id": winner_id}
+
+
+@app.post("/api/merge_proposals/{proposal_id}/reject")
+def post_reject_merge(proposal_id: int, req: RejectProposalRequest) -> dict:
+    try:
+        identity_reject(proposal_id, reason=req.reason, by=req.by)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}

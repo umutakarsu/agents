@@ -223,3 +223,73 @@ that resets per run.
 ```bash
 python scripts/demo.py
 ```
+
+## Phase 7: identity unification
+
+One real person can be `@ali` in Slack, `ali@acme.com` in Gmail, and
+`ali-acme` on GitHub. Without unification every connector sees a
+stranger. With unification — and **only** with a human-in-the-loop for
+risky merges — the memory layer can join cross-source signals into one
+canonical identity per workspace.
+
+The risk asymmetry shapes the design: a *missed* merge is mild (you'll
+see duplicates in the UI), a *bad* merge is a security incident (someone
+now sees restricted memory that wasn't addressed to them). So the
+algorithm errs on caution.
+
+**Tables (see `schema.sql`):**
+
+| Table | Role |
+|---|---|
+| `identity` | Canonical (workspace, entity_key) -> canonical_name + kind |
+| `identity_alias` | Per-source aliases, `(source, external_id)` unique globally |
+| `merge_proposal` | Pending pairs the system wants a human to approve |
+| `merge_denylist` | Pairs a human rejected — never propose again |
+| `identity_merge_log` | Reversal snapshot (winner/loser, aliases moved) |
+
+**Signals (five classes, see `memlayer/identity.py`):**
+
+1. Exact email match — weight 1.0
+2. Exact handle match (`@ali` slack == `ali` notion) — weight 0.7
+3. Local-part / handle Levenshtein similarity — weight 0.5
+4. Display-name Levenshtein similarity — weight 0.6
+5. Co-occurrence in chunk text — weight 0.4
+
+Combined confidence is a weighted average over signals that **fire**
+(value > 0.3). Rules:
+
+- combined >= 0.95 **and** >= 2 distinct signals fired -> **auto-merge**
+- 0.70 <= combined < 0.95 (or 0.95 with only 1 signal) -> **propose**
+- otherwise -> **ignore**
+
+**Adversarial defenses:**
+
+- Rate limit: a single source can add at most 50 aliases per workspace
+  per hour. Spamming aliases to inflate `evidence_count` and engineer an
+  auto-merge is throttled.
+- Brand-new source ceiling: an alias from a source with <= 1 prior
+  alias rows in the workspace is capped at confidence 0.7. A freshly
+  connected hostile source cannot reach auto-merge on day one.
+- Two-signal requirement: even at combined confidence 0.99, a single
+  signal class is never enough. A perfect name collision alone is just
+  a name collision.
+
+**Demo seeding (acme workspace):**
+
+- `person:ali` — three aliases (`@ali` slack, `ali@acme.com` gmail,
+  `ali-acme` github) that **do** unify into one identity.
+- `person:bjorn` — three aliases across slack / gmail / notion.
+- `person:chen` — one alias only (`chen@acme.com` gmail). Unresolved.
+- `person:ali-karsi` — looks like Ali Karsu but isn't. Name and handle
+  similarity push it above the propose threshold; the lack of an exact
+  email match (different domain) keeps it below auto-merge. A pending
+  merge proposal is created for human review.
+
+**memscope UI:**
+
+A new **Identities** tab shows the unified identities for a workspace,
+a per-identity cluster graph (hub-and-spoke of source-colored alias
+chips), pending merge proposals with signal breakdowns, and approve /
+reject actions. Approving a proposal calls `merge()` and the identities
+collapse in the list; rejecting writes to `merge_denylist` so the same
+pair is never proposed again.
