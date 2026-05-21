@@ -78,24 +78,17 @@ def ingest(items: list[SourceItem], workspace: str) -> IngestStats:
                     stats.embeddings_reused += 1
 
                 # Permission changes patch this row only -- never re-embed.
-                # ACL updates are union-only: re-ingestion can WIDEN audience
-                # but never NARROW it. Narrowing requires an explicit endpoint
-                # with auth, which doesn't exist yet. Without this clause, any
-                # unauthenticated caller can re-ingest the same content with a
-                # permissive principals list and silently demote a restricted
-                # chunk to public.
+                # Re-ingestion is a NO-OP on an existing chunk's ACL: it can
+                # neither widen nor narrow. Any ACL change must come through
+                # an explicit, authenticated endpoint (not yet built). Without
+                # this guard, an unauthenticated caller can re-ingest the
+                # same content with permissive principals to either demote
+                # restricted content or grant themselves access.
                 cur.execute(
                     """
                     INSERT INTO chunk_acl (content_hash, workspace, allowed_principals)
                     VALUES (%s, %s, %s)
-                    ON CONFLICT (content_hash, workspace)
-                    DO UPDATE SET allowed_principals = (
-                        SELECT array_agg(DISTINCT p)
-                        FROM unnest(
-                            chunk_acl.allowed_principals
-                            || EXCLUDED.allowed_principals
-                        ) AS p
-                    )
+                    ON CONFLICT (content_hash, workspace) DO NOTHING
                     """,
                     (h, workspace, item.allowed_principals),
                 )
