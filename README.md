@@ -144,9 +144,12 @@ Claude Code config snippet:
 }
 ```
 
-Permissions: the MCP server currently trusts the caller's principals as
-supplied. Production deployments need an auth layer (see note in
-`memscope/app.py`).
+Permissions: the **stdio** transport trusts the caller's `principals`
+verbatim -- the client spawned the process locally; the OS already
+authenticated the user. The **HTTP** transport requires the same bearer
+token memscope uses (see "Auth" section below) and will additionally
+override `source_type` with the token owner's identity, so an agent
+service-account can't claim `source_type="human"` over the wire.
 
 ## memscope -- visual inspector
 
@@ -162,12 +165,32 @@ uvicorn memscope.app:app --host 127.0.0.1 --reload
 # open http://localhost:8000
 ```
 
-> **No auth — bind to localhost only.** memscope's HTTP layer does not
-> authenticate callers and trusts whatever `principals` they pass. The
-> retrieval-side ACL pre-filter is still applied in SQL, but anyone with
-> network reach to the listening port can claim `group:exec` and read
-> restricted content. Always pass `--host 127.0.0.1` (or run behind a
-> trusted reverse proxy that adds auth) until a real identity layer ships.
+### Auth
+
+memscope (and the MCP server's HTTP transport) require a bearer token.
+The user record stores the ONLY principals the caller is authorized to
+claim, plus the ONLY workspaces they can touch -- so the HTTP boundary
+is now an identity boundary, not just a parameter pass-through.
+
+```bash
+# Mint a token (prints the plaintext ONCE -- save it).
+python scripts/create_user.py \
+    --email ali@example.com \
+    --principals group:exec,user:ali \
+    --workspaces acme,personal
+
+# Use it.
+curl -H "Authorization: Bearer <token>" 'http://localhost:8000/api/search?workspace=acme&q=...&k=5'
+```
+
+The `principals` query string the UI used to send is now ignored: the
+server only trusts what the user row says. Cross-workspace requests get
+a 403; bad tokens get a 401.
+
+**Demo / dev mode**: set `MEMSCOPE_AUTH_DISABLED=1` to bypass auth -- every
+request acts as a synthetic anonymous user with `principals=["group:all"]`
+and access to every workspace in the DB. The bundled scenarios run in
+this mode. Production deploys must leave the variable unset.
 
 Read-only -- it inspects whatever's already in your Postgres. Pipeline,
 Search, and Ingest views from the design are not built yet.

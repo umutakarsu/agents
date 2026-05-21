@@ -6,14 +6,34 @@ Five tools, each a thin adapter over an existing memlayer function. No
 business logic lives here -- this module's only job is to translate JSON
 arguments into the right Python call and shape the result back.
 
-Trust model: this server currently TRUSTS the caller's `principals` as
-supplied in tool arguments. Production deployments need an identity layer
-in front (same caveat as memscope's HTTP API).
+Trust model
+===========
+Two transports, two threat models:
+
+* **stdio** (the canonical MCP transport for local clients) -- the client
+  spawns this process and speaks JSON-RPC over our stdin/stdout. There is
+  no network attacker between the client and us; the OS already
+  authenticated the local user. The client passes ``principals`` as a tool
+  argument (MCP-native pattern), and we trust it the same way a CLI
+  trusts its argv. If you don't trust the client to ask honestly, don't
+  let it spawn the process.
+
+* **Streamable HTTP** -- once we listen on a socket, ANY caller with
+  network reach can hit us. We require a bearer token (``MEMSCOPE_TOKEN``
+  env var, or the client sends ``Authorization: Bearer <t>``) and
+  reject anything else. This is the same identity layer memscope's HTTP
+  API uses, intentionally -- ``scripts/create_user.py`` mints tokens that
+  work for both. The token's source_type also OVERRIDES whatever
+  ``source_type`` an HTTP ``remember`` caller asks for, closing the audit
+  P1: an agent service-account can't claim ``source_type="human"`` to
+  outrank a real human via the supersede ladder.
 """
 
 from __future__ import annotations
 
 import json
+import os
+from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
@@ -22,6 +42,7 @@ import mcp.types as mcp_types
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
+from memlayer.auth import User, authenticate
 from memlayer.ingest import SourceItem, ingest
 from memlayer.retrieval import search
 from memlayer.writeback import history, recall, remember
@@ -31,6 +52,12 @@ SERVER_VERSION = "0.1.0"
 
 # Hard cap on `k` to keep result payloads bounded regardless of caller input.
 MAX_K = 100
+
+# Per-request authenticated user (HTTP transport only). The stdio transport
+# leaves this None and trusts tool arguments -- see module docstring.
+_current_user: ContextVar[User | None] = ContextVar(
+    "memlayer_mcp_user", default=None
+)
 
 
 # ---------------------------------------------------------------------------
@@ -210,11 +237,19 @@ def _do_search_memory(args: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _do_remember(args: dict[str, Any]) -> dict[str, Any]:
+    # HTTP transport: if an authenticated user is in scope, their
+    # source_type wins over whatever the caller asked for. This closes the
+    # audit P1: an agent service-account can't claim source_type='human'
+    # via the wire to outrank a real human in the supersede ladder.
+    # Stdio transport leaves _current_user=None; the local client's arg is
+    # honoured because it isn't a network attacker (see module docstring).
+    user = _current_user.get()
+    source_type = user.source_type if user is not None else args["source_type"]
     new_id, is_current = remember(
         workspace=args["workspace"],
         entity_key=args["entity_key"],
         content=args["content"],
-        source_type=args["source_type"],
+        source_type=source_type,
         source_id=args["source_id"],
         confidence=float(args["confidence"]),
         allowed_principals=list(
@@ -378,7 +413,14 @@ async def serve_stdio() -> None:
 async def serve_http(host: str = "127.0.0.1", port: int = 3111) -> None:
     """Run the MCP server over Streamable HTTP. Useful for remote clients
     and for testing with curl. Single-session manager per process, as the
-    mcp library mandates."""
+    mcp library mandates.
+
+    Auth: every request must carry ``Authorization: Bearer <token>``. The
+    token is the same shape memscope uses (issued by
+    ``scripts/create_user.py``). The authenticated user is pinned to the
+    request via a ContextVar so ``_do_remember`` can override source_type
+    without changing the tool-call signature. ``MEMSCOPE_AUTH_DISABLED=1``
+    bypasses this for local dev -- DO NOT set in production."""
     import contextlib
 
     import uvicorn
@@ -389,10 +431,55 @@ async def serve_http(host: str = "127.0.0.1", port: int = 3111) -> None:
 
     session_manager = StreamableHTTPSessionManager(app=server, stateless=False)
 
+    auth_disabled = os.environ.get("MEMSCOPE_AUTH_DISABLED", "").strip() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+    def _read_bearer(scope: Scope) -> str | None:
+        for k, v in scope.get("headers", []):
+            if k == b"authorization":
+                s = v.decode("latin-1")
+                if s.startswith("Bearer "):
+                    return s[len("Bearer "):]
+        return None
+
+    async def _send_401(send: Send, detail: str) -> None:
+        body = json.dumps({"error": detail}).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"www-authenticate", b'Bearer realm="memlayer"'),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
     async def handle_streamable_http(
         scope: Scope, receive: Receive, send: Send
     ) -> None:
-        await session_manager.handle_request(scope, receive, send)
+        if auth_disabled:
+            await session_manager.handle_request(scope, receive, send)
+            return
+        token = _read_bearer(scope)
+        if token is None:
+            await _send_401(send, "Missing Authorization: Bearer <token>")
+            return
+        user = authenticate(token)
+        if user is None:
+            await _send_401(send, "Invalid token")
+            return
+        # Pin the user for the lifetime of this request; _do_remember reads
+        # it to override source_type.
+        tok = _current_user.set(user)
+        try:
+            await session_manager.handle_request(scope, receive, send)
+        finally:
+            _current_user.reset(tok)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette):
