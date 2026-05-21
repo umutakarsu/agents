@@ -14,6 +14,16 @@ from datetime import datetime, timezone
 from memlayer.compress import compress, lineage
 from memlayer.connectors.local_files import read_dir
 from memlayer.db import connect
+from memlayer.governance import (
+    assign_writer,
+    authority_for,
+    classify_entity,
+    pending_conflicts,
+    resolve_conflict,
+    seed_acme_policies,
+    seed_default_policies,
+    upsert_role,
+)
 from memlayer.ingest import SourceItem, ingest
 from memlayer.retrieval import search
 from memlayer.scrub import scrub
@@ -29,14 +39,25 @@ def check(name: str, cond: bool) -> None:
         _FAILS.append(name)
 
 
+def _is_superseded(memory_id: int) -> bool:
+    """True iff memory row ``memory_id`` has a non-NULL superseded_by."""
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT superseded_by FROM memory WHERE id = %s", (memory_id,),
+        )
+        row = cur.fetchone()
+    return row is not None and row[0] is not None
+
+
 def reset() -> None:
     with connect() as conn, conn.cursor() as cur:
-        # summary_lineage references memory(id); CASCADE on the TRUNCATE
-        # would normally handle it but we include it explicitly so the
-        # reset survives the Phase 8 schema being applied or not.
+        # summary_lineage + memory_conflict reference memory(id); explicit
+        # TRUNCATE order keeps this resilient regardless of which phase's
+        # schema is applied. CASCADE handles identity / governance fks.
         cur.execute(
-            "TRUNCATE summary_lineage, memory, chunk_acl, embeddings, "
-            "event_chunks, chunks, raw_events, redactions_log "
+            "TRUNCATE summary_lineage, memory_conflict, memory, "
+            "chunk_acl, embeddings, event_chunks, chunks, raw_events, "
+            "redactions_log, writer_role, authority_policy, role "
             "RESTART IDENTITY CASCADE"
         )
         conn.commit()
@@ -295,6 +316,181 @@ def main() -> None:
     check(
         "re-running compress() on the same entity is a no-op",
         again.summary_id is None and again.skipped_reason is not None,
+    )
+
+    print("Phase 9: governance-modeled conflict resolution")
+    # Seed defaults + acme policies. Both seeders are idempotent so calling
+    # them twice (e.g. on a re-run) is harmless.
+    seed_default_policies()
+    seed_acme_policies()
+    seed_default_policies()  # idempotent re-call
+
+    # classify_entity heuristics: prefix-based routing.
+    check(
+        "classify_entity: security: prefix -> 'security'",
+        classify_entity("security:incident-12") == "security",
+    )
+    check(
+        "classify_entity: topic:layoffs -> 'hr'",
+        classify_entity("topic:layoffs-q1") == "hr",
+    )
+    check(
+        "classify_entity: unknown prefix -> 'general'",
+        classify_entity("widget:42") == "general",
+    )
+
+    # Two writers in the acme workspace, each tied to a role.
+    acme = "acme9"  # isolated workspace name so we don't collide w/ demo
+    # Mirror acme policies onto the acme9 workspace via role assignment in
+    # the acme workspace shared catalog. Simplest path: reuse seed_acme
+    # logic by reseeding under acme9.
+    sec_role = upsert_role(acme, "human", "security_lead", base_authority=4.5)
+    eng_role = upsert_role(acme, "human", "engineering_manager", base_authority=4.0)
+    from memlayer.governance import upsert_policy
+    upsert_policy(acme, "security", sec_role, 5.0)
+    upsert_policy(acme, "security", eng_role, 4.0)
+    upsert_policy(acme, "engineering", eng_role, 5.0)
+    upsert_policy(acme, "engineering", sec_role, 3.5)
+    upsert_policy(acme, "general", sec_role, 3.0)
+    upsert_policy(acme, "general", eng_role, 3.0)
+
+    assign_writer(acme, "human", "eng_manager", eng_role)
+    assign_writer(acme, "human", "security_lead", sec_role)
+
+    # authority_for sanity: same human writers get different authorities
+    # depending on the entity_kind.
+    sec_on_sec = authority_for(acme, "human", "security_lead", "security")
+    eng_on_sec = authority_for(acme, "human", "eng_manager", "security")
+    check(
+        "security_lead authority 5.0 on entity_kind=security",
+        abs(sec_on_sec - 5.0) < 1e-6,
+    )
+    check(
+        "engineering_manager authority 4.0 on entity_kind=security",
+        abs(eng_on_sec - 4.0) < 1e-6,
+    )
+    sec_on_gen = authority_for(acme, "human", "security_lead", "general")
+    eng_on_gen = authority_for(acme, "human", "eng_manager", "general")
+    check(
+        "security_lead and eng_manager both 3.0 on entity_kind=general (tie)",
+        abs(sec_on_gen - 3.0) < 1e-6 and abs(eng_on_gen - 3.0) < 1e-6,
+    )
+
+    # Security entity: eng_manager writes first, security_lead overrides.
+    sec_entity = "security:incident-12"
+    eng_id, eng_is_cur = remember(
+        acme, sec_entity, "the breach is contained",
+        "human", "eng_manager", confidence=0.9,
+    )
+    check(
+        "eng_manager's row is initially current (sole live row)",
+        eng_is_cur is True,
+    )
+    sec_id, sec_is_cur = remember(
+        acme, sec_entity,
+        "the breach is NOT contained, ongoing investigation",
+        "human", "security_lead", confidence=0.9,
+    )
+    check(
+        "security_lead's row wins on entity_kind=security (5.0 > 4.0)",
+        sec_is_cur is True,
+    )
+    cur_sec = recall(acme, sec_entity)
+    check(
+        "recall surfaces security_lead's wording on security entity",
+        cur_sec is not None and "NOT contained" in cur_sec.content,
+    )
+    check(
+        "eng_manager's row is now superseded (clean win, no conflict)",
+        _is_superseded(eng_id),
+    )
+
+    # General entity: both leads tie at authority 3.0 -> conflict surfaced.
+    gen_entity = "topic:framework-choice"
+    eng_gid, _ = remember(
+        acme, gen_entity, "use React for the rewrite",
+        "human", "eng_manager", confidence=0.9,
+    )
+    sec_gid, sec_gid_is_cur = remember(
+        acme, gen_entity, "use Vue for the rewrite",
+        "human", "security_lead", confidence=0.9,
+    )
+    # On a tie, BOTH stay live -- so the new row IS current.
+    check(
+        "tie: new row stays current (not silently superseded)",
+        sec_gid_is_cur is True,
+    )
+    check(
+        "tie: previous row stays live (not superseded)",
+        not _is_superseded(eng_gid),
+    )
+    open_confs = pending_conflicts(acme)
+    matching = [
+        c for c in open_confs
+        if c.entity_key == gen_entity
+        and {c.row_a, c.row_b} == {eng_gid, sec_gid}
+    ]
+    check(
+        "memory_conflict row exists for the tied pair",
+        len(matching) == 1,
+    )
+
+    # Resolve via governance.resolve_conflict picking eng_manager's row.
+    cid = resolve_conflict(
+        acme, eng_gid, sec_gid,
+        resolved_by="role:security_lead",
+        winner_id=eng_gid,
+    )
+    check("resolve_conflict returns a conflict id", isinstance(cid, int))
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, winner_id, resolved_by FROM memory_conflict "
+            "WHERE id = %s", (cid,),
+        )
+        status, winner_id, resolved_by = cur.fetchone()
+    check("conflict status='resolved' after resolve_conflict",
+          status == "resolved")
+    check("conflict winner_id matches the chosen row",
+          winner_id == eng_gid)
+    check("conflict resolved_by recorded", resolved_by == "role:security_lead")
+    check("loser row is now superseded after resolution",
+          _is_superseded(sec_gid))
+    check("winner row stays current after resolution",
+          not _is_superseded(eng_gid))
+    # And the conflict is no longer pending.
+    still_pending = [
+        c for c in pending_conflicts(acme) if c.id == cid
+    ]
+    check("resolved conflict drops out of pending list",
+          still_pending == [])
+
+    # Backward compat: a workspace with NO policies set up should still
+    # work via the flat ladder. Pre-Phase-9 semantics: human (auth 3.0)
+    # beats agent (auth 1.0) cleanly, no conflict surfaced.
+    bare = "bare-ws"
+    bare_eid = "person:rae"
+    a_id, _ = remember(
+        bare, bare_eid, "rae works on infra",
+        "agent", "scanner", confidence=0.7,
+    )
+    h_id, h_is_cur = remember(
+        bare, bare_eid, "Rae leads infra",
+        "human", "boss", confidence=0.95,
+    )
+    check(
+        "flat ladder fallback: human wins over agent without any policies",
+        h_is_cur is True,
+    )
+    check(
+        "flat ladder fallback: agent row is superseded",
+        _is_superseded(a_id),
+    )
+    bare_open = [
+        c for c in pending_conflicts(bare) if c.entity_key == bare_eid
+    ]
+    check(
+        "flat ladder fallback: no conflict surfaced (delta > epsilon)",
+        bare_open == [],
     )
 
     print()
