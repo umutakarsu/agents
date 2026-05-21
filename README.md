@@ -223,3 +223,86 @@ that resets per run.
 ```bash
 python scripts/demo.py
 ```
+
+## Phase 10: Federated Cross-Tenant Concept Ontology
+
+The fourth moat: the platform learns from every customer's workspace, but
+**no customer's content ever bleeds into another customer's retrieval**.
+
+The mechanism is deliberately simple and provably safe: extract a per-tenant
+**concept vocabulary** (n-gram terms that appear in that tenant's chunks /
+memory), aggregate the vocabulary cross-tenant, and discover synonym pairs
+that co-occur in many tenants' vocabularies. Concepts are the *names of
+things* an org talks about; instances are the actual conversations.
+
+```bash
+# Build the per-tenant vocab and aggregate cross-tenant counts.
+python scripts/federated.py index-all
+
+# Discover synonym pairs (co-occurring concepts across >= N tenants).
+python scripts/federated.py synonyms
+
+# The demo moment: top concepts by how many tenants share them.
+python scripts/federated.py top-concepts
+
+# Privacy self-test.
+python scripts/federated.py privacy-check
+
+# Show what a query would expand to via cross-tenant synonyms.
+python scripts/federated.py expand "pull request feedback"
+```
+
+### What IS shared cross-tenant
+
+- **Concept names** -- literal terms like `"code review"`, `"customer churn"`.
+  Treated as dictionary-class vocabulary, not workspace-private content.
+- **Aggregate counts** -- `global_count` (sum) and `tenant_count` (distinct
+  workspaces that have a concept). Never attributed.
+- **Synonym pairs** -- two concept names that co-occur in the vocabularies of
+  at least `min_tenants` (default 2) distinct workspaces. Stored once per
+  pair, with a cooccurrence-tenant count and a confidence in `[0, 1]`.
+
+### What is NEVER shared cross-tenant
+
+- chunk content, memory content, entity keys,
+- the actual rows that produced the concept extraction,
+- which specific tenants have which concepts,
+- any concept whose `tenant_count == 1` is excluded from synonym formation
+  (a singleton concept would otherwise leak workspace identity).
+
+The privacy contract is enforced **structurally**, not by policy:
+`compute_synonyms` and `expand_query` only read from the aggregate `concept`
+and `concept_synonym` tables. The per-tenant `tenant_concept` table is only
+read with an explicit workspace scope, by `index_workspace` (single tenant),
+or aggregated to `(workspace, concept_id, local_count)` triples whose
+workspace identity is dropped before storage. The e2e test verifies the
+literal SQL: cross-tenant aggregation paths never SELECT `chunks.text` or
+`memory.content`.
+
+### How it lifts retrieval (integration point)
+
+`memlayer.federated.expand_query(query)` returns a list of synonym concepts
+discovered cross-tenant. A query for `"PR feedback"` learns from the
+population that `"code review"` is a strongly related concept, even if the
+caller's own workspace never used that exact phrase. This widens FTS recall
+without any other tenant's content ever crossing the boundary.
+
+The expansion helper is a clearly-labelled hook today; wiring it into
+`memlayer/retrieval.py` is intentionally deferred so the ontology layer can
+land independently.
+
+### Known weaknesses (audit notes)
+
+- **Concept-name surface area**: concept names are themselves text. A
+  pathological vocabulary (e.g. an internal codename that's also unique to
+  one tenant) is technically dictionary-class but practically a unique
+  identifier. Today we exclude `tenant_count == 1` from synonym formation,
+  which kills the leak vector through synonyms, but if downstream callers
+  ever surface raw `concept.name` rows directly, single-tenant names are
+  still exposed. Mitigation: filter callers to `tenant_count >= 2`.
+- **Frequency-based identification**: `global_count` is a simple sum across
+  tenants. A concept with `tenant_count == 2` but `global_count == 9000`
+  effectively reveals that one of those two tenants has thousands of
+  occurrences -- a fingerprint, not an identity, but information leakage at
+  the margins. A k-anonymity or differential-privacy noise layer on counts
+  would close this.
