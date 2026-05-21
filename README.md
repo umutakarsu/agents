@@ -194,6 +194,77 @@ Cleanup is more expensive than prevention — wiping a secret from `chunks`
 after the fact would also force re-embedding. Scrubbing at the ingest
 boundary side-steps that whole class of cleanup.
 
+## Phase 9: governance-modeled conflict resolution
+
+The Phase 3 precedence ladder was a flat `human > system > agent`. Real
+organisations need finer answers: a security lead's "this is wrong"
+should override an engineering manager's "this is right" on a security
+incident, even though both are humans; two equal-rank humans on a general
+topic should *surface* a conflict instead of one silently overwriting
+the other.
+
+Precedence is now a function of `(role, entity_kind, confidence, recency,
+policy)`. The pieces:
+
+- **`role`** — a per-workspace label (e.g. `security_lead`,
+  `engineering_manager`, `ic_engineer`) attached to a `source_type`.
+- **`writer_role`** — maps a concrete `(source_type, source_id)` to a role.
+- **`authority_policy`** — `(workspace, entity_kind, role) -> authority`
+  rows. Higher authority wins. The wildcard kind `*` and the `default`
+  workspace act as fallbacks.
+- **`memory.entity_kind`** — derived at write time by
+  `governance.classify_entity(entity_key)` (e.g. `security:incident-12` →
+  `security`; `topic:layoffs-q1` → `hr`).
+- **`memory_conflict`** — when the top two live rows' authorities differ
+  by less than `CONFLICT_EPSILON` (0.05), both stay live and a pending
+  conflict row is recorded for human resolution.
+
+A workspace with no policies configured falls back to the old flat
+ladder (human=3.0, system=2.0, agent=1.0), so existing data and demos
+behave exactly as before until you opt in.
+
+```bash
+# Seed the system-wide defaults + an example acme policy set.
+PYTHONPATH=$PWD python -c "
+from memlayer.governance import seed_default_policies, seed_acme_policies
+seed_default_policies(); seed_acme_policies()
+"
+
+# What's the role catalog and policy table for acme?
+python scripts/govern.py list-policies --workspace acme
+
+# A security incident -- security_lead authority 5.0 > eng_manager 4.0.
+python scripts/remember.py acme "security:incident-12" \
+    "the breach is contained" --source human:eng_manager --confidence 0.9
+python scripts/remember.py acme "security:incident-12" \
+    "the breach is NOT contained" --source human:security_lead --confidence 0.9
+python scripts/recall.py acme "security:incident-12"
+# -> security_lead's wording, eng_manager's row superseded.
+
+# A general topic -- both tied at 3.0. Both rows stay live; a conflict
+# row is surfaced for a higher-authority role to resolve.
+python scripts/remember.py acme "topic:framework" \
+    "use React" --source human:eng_manager --confidence 0.9
+python scripts/remember.py acme "topic:framework" \
+    "use Vue" --source human:security_lead --confidence 0.9
+python scripts/govern.py conflicts --workspace acme
+
+# Resolve. The chosen row stays current, the other gets superseded.
+python scripts/govern.py resolve --conflict-id 1 --winner-row 2 \
+    --by 'role:security_lead'
+```
+
+Custom org charts are just rows -- no schema change required:
+
+```bash
+python scripts/govern.py add-role --workspace acme --type human \
+    --name vp_engineering --authority 4.7
+python scripts/govern.py add-policy --workspace acme \
+    --kind engineering --role vp_engineering --authority 6.0
+python scripts/govern.py assign --workspace acme --type human \
+    --source-id alice --role vp_engineering
+```
+
 ## Phase 6: tiered memory + Ebbinghaus decay
 
 Memory rows now carry a `tier` (`working` / `episodic` / `semantic` / `procedural`)

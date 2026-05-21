@@ -124,3 +124,73 @@ ALTER TABLE memory
 -- low-tier scans cheap as the table grows.
 CREATE INDEX IF NOT EXISTS idx_memory_tier_refd
     ON memory (tier, last_referenced_at);
+
+-- Phase 9: governance-modeled conflict resolution.
+-- The old flat ladder (human > system > agent) couldn't answer "which
+-- human?" -- a security_lead and an engineering_manager both write 'human'
+-- rows and one will overwrite the other purely on confidence/recency. The
+-- governance model replaces the rank-3-for-all-humans rule with a role
+-- catalog, a per-workspace policy table that maps (entity_kind, role) ->
+-- numeric authority, and a conflict ledger for ties the system can't break
+-- on its own. When no policy is configured the resolution falls back to
+-- the original flat ladder, so existing demo data keeps its meaning.
+
+-- Per-workspace role catalog. Each user/agent acts as one or more roles.
+CREATE TABLE IF NOT EXISTS role (
+    id BIGSERIAL PRIMARY KEY,
+    workspace TEXT NOT NULL,                  -- 'default' = system-wide
+    source_type TEXT NOT NULL
+        CHECK (source_type IN ('human','system','agent')),
+    name TEXT NOT NULL,                       -- 'security_lead', 'engineering_manager'
+    base_authority REAL NOT NULL DEFAULT 1.0
+        CHECK (base_authority BETWEEN 0.0 AND 10.0),
+    UNIQUE (workspace, source_type, name)
+);
+
+-- Policy: for an entity_kind in a workspace, which role has authority?
+-- Higher 'authority' wins. Multiple rules can match; highest wins.
+CREATE TABLE IF NOT EXISTS authority_policy (
+    id BIGSERIAL PRIMARY KEY,
+    workspace TEXT NOT NULL,                  -- 'default' = system-wide
+    entity_kind TEXT NOT NULL,                -- 'security', 'engineering', 'sales', '*' (default)
+    role_id BIGINT NOT NULL REFERENCES role(id),
+    authority REAL NOT NULL
+        CHECK (authority BETWEEN 0.0 AND 10.0),
+    UNIQUE (workspace, entity_kind, role_id)
+);
+
+-- Optional: each user/agent's primary role. (If a writer's source_id matches a
+-- role's name, we use that role; otherwise we fall back to a default per source_type.)
+CREATE TABLE IF NOT EXISTS writer_role (
+    workspace TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,                  -- the source_id used in remember()
+    role_id BIGINT NOT NULL REFERENCES role(id),
+    PRIMARY KEY (workspace, source_type, source_id)
+);
+
+-- Entity kind classification. Stored explicitly so policies can target it.
+-- A new memory row's entity_kind is derived (see classify_entity below) and
+-- stored alongside.
+ALTER TABLE memory
+    ADD COLUMN IF NOT EXISTS entity_kind TEXT NOT NULL DEFAULT 'general';
+
+-- Conflicts that the system couldn't auto-resolve.
+CREATE TABLE IF NOT EXISTS memory_conflict (
+    id BIGSERIAL PRIMARY KEY,
+    workspace TEXT NOT NULL,
+    entity_key TEXT NOT NULL,
+    row_a BIGINT NOT NULL REFERENCES memory(id),
+    row_b BIGINT NOT NULL REFERENCES memory(id),
+    authority_a REAL NOT NULL,
+    authority_b REAL NOT NULL,
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at TIMESTAMPTZ,
+    resolved_by TEXT,                         -- 'role:security_lead' or similar
+    winner_id BIGINT REFERENCES memory(id),
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','resolved','dismissed')),
+    CHECK (row_a < row_b)
+);
+CREATE INDEX IF NOT EXISTS memory_conflict_pending_idx
+    ON memory_conflict (workspace, status) WHERE status = 'pending';

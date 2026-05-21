@@ -3,9 +3,16 @@ events. Append-only -- content is never mutated or deleted; a losing memory
 only gets a superseded_by pointer, so the full history stays auditable.
 
 Conflict resolution when several memories describe the same entity_key:
-precedence is (source rank, confidence, recency). Human overrides system
-overrides agent; then higher confidence; then newer. Exactly one memory per
-entity is "current" (superseded_by IS NULL).
+precedence is (authority, confidence, recency) where ``authority`` comes
+from the governance model (``memlayer.governance``). With no policies
+configured the authority lookup falls back to the flat ladder (human=3.0,
+system=2.0, agent=1.0), so pre-Phase-9 behaviour is preserved.
+
+When the top two live rows have authorities that are effectively equal
+(within ``governance.CONFLICT_EPSILON``), the system records a row in
+``memory_conflict`` and leaves *both* live. A higher-authority role -- or
+a human via the CLI -- can resolve the conflict later. This is what
+prevents two equal-rank humans from silently overwriting each other.
 
 Phase 6 (tiered memory + Ebbinghaus decay): each memory row carries a
 ``tier`` (working / episodic / semantic / procedural) and a
@@ -37,9 +44,27 @@ class MemoryRow:
     effective_confidence: float | None = None
 
 
-def _precedence(source_type: str, confidence: float, mem_id: int) -> tuple:
-    # Higher tuple wins. mem_id is a monotonic tiebreaker == "newer".
-    return (_SOURCE_RANK.get(source_type, 0), confidence, mem_id)
+def _precedence(
+    source_type: str,
+    source_id: str,
+    confidence: float,
+    mem_id: int,
+    workspace: str,
+    entity_kind: str,
+) -> tuple:
+    """Precedence tuple compared lexicographically; higher wins.
+
+    Authority is governance-driven: ``authority_for`` looks up the writer's
+    role and the matching policy, or falls back to the flat ladder. The
+    ``mem_id`` tiebreaker keeps "newer wins" semantics when authority +
+    confidence are identical.
+    """
+    # Local import to avoid an import cycle: governance imports db only,
+    # but writeback is imported eagerly by demo / scripts and we want the
+    # governance module to remain optional from a load-order perspective.
+    from memlayer.governance import authority_for
+    auth = authority_for(workspace, source_type, source_id, entity_kind)
+    return (auth, confidence, mem_id)
 
 
 def remember(
@@ -82,13 +107,26 @@ def remember(
         )
     derived_from = derived_from or []
     allowed_principals = allowed_principals or ["group:all"]
+    # Classify the entity so policy lookups have something to match on.
+    # Done at write time and stored on the row so retrieval / debugging
+    # doesn't have to re-derive it (and so re-tagging a row is just an
+    # UPDATE -- no behaviour change needed in this function).
+    from memlayer.governance import (
+        CONFLICT_EPSILON,
+        _authority_with_origin,
+        classify_entity,
+        record_conflict,
+    )
+    entity_kind = classify_entity(entity_key)
+
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO memory
                 (workspace, entity_key, content, source_type, source_id,
-                 derived_from, confidence, allowed_principals, tier)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 derived_from, confidence, allowed_principals, tier,
+                 entity_kind)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -101,6 +139,7 @@ def remember(
                 confidence,
                 allowed_principals,
                 tier,
+                entity_kind,
             ),
         )
         new_id = cur.fetchone()[0]
@@ -108,7 +147,7 @@ def remember(
         # All currently-live memories for this entity, including the new row.
         cur.execute(
             """
-            SELECT id, source_type, confidence
+            SELECT id, source_type, source_id, confidence
             FROM memory
             WHERE workspace = %s AND entity_key = %s AND superseded_by IS NULL
             """,
@@ -116,21 +155,85 @@ def remember(
         )
         live = cur.fetchall()
 
-        winner_id = max(
-            live, key=lambda r: _precedence(r[1], r[2], r[0])
-        )[0]
+    # Compute authority + precedence tuple for each live row outside the
+    # cursor loop -- ``authority_for`` opens its own connection, and nesting
+    # psycopg connections in the same context-manager block deadlocks.
+    # ``scored`` rows are (id, authority, confidence, source_type, source_id,
+    # precedence_tuple, governed_flag).
+    scored = []
+    for row in live:
+        mem_id, stype, sid, conf = row
+        auth, governed = _authority_with_origin(
+            workspace, stype, sid, entity_kind
+        )
+        # ``prec`` mirrors what _precedence() would return for this row; we
+        # build it inline rather than calling _precedence so we don't make
+        # the authority lookup twice (it does its own DB round-trip).
+        prec = (auth, conf, mem_id)
+        scored.append((mem_id, auth, conf, stype, sid, prec, governed))
 
-        # Everyone live except the winner points at the winner. Append-only:
-        # we only ever set a NULL superseded_by, never rewrite content.
-        for mem_id, _, _ in live:
-            if mem_id != winner_id:
-                cur.execute(
-                    "UPDATE memory SET superseded_by = %s "
-                    "WHERE id = %s AND superseded_by IS NULL",
-                    (winner_id, mem_id),
-                )
+    # Pick a winner with the governance-aware precedence tuple. Lexicographic
+    # comparison: highest authority, then highest confidence, then newest id.
+    winner = max(scored, key=lambda s: s[5])
+    winner_id = winner[0]
+
+    # Tie detection: any other live row whose authority is within epsilon
+    # of the winner's authority is treated as an unresolved conflict -- but
+    # only when at least one of the two rows is *governed* (i.e. the
+    # authority came from an explicit role/policy rather than the
+    # flat-ladder fallback). Two ungoverned rows resolve the pre-Phase-9
+    # way: confidence + recency in _precedence break the tie cleanly and no
+    # memory_conflict row is surfaced. This is what keeps demos / data
+    # without policies set up behaving exactly like before.
+    winner_auth = winner[1]
+    winner_governed = winner[6]
+    tie_ids: set[int] = {winner_id}
+    for mem_id, auth, _conf, _stype, _sid, _prec, gov in scored:
+        if mem_id == winner_id:
+            continue
+        if abs(auth - winner_auth) > CONFLICT_EPSILON:
+            continue
+        if not (gov or winner_governed):
+            # Both ungoverned -> behave like the old flat ladder + confidence.
+            continue
+        tie_ids.add(mem_id)
+
+    with connect() as conn, conn.cursor() as cur:
+        # Supersede every non-tie loser. Append-only: we only ever set a
+        # NULL superseded_by, never rewrite content.
+        for mem_id, _auth, _conf, _stype, _sid, _prec, _gov in scored:
+            if mem_id in tie_ids:
+                continue
+            cur.execute(
+                "UPDATE memory SET superseded_by = %s "
+                "WHERE id = %s AND superseded_by IS NULL",
+                (winner_id, mem_id),
+            )
         conn.commit()
-    return new_id, winner_id == new_id
+
+    # Record a pending conflict for each tie row paired with the winner.
+    # ``record_conflict`` is idempotent on (workspace, row_a, row_b) so a
+    # repeated write that re-detects the same tie does not duplicate.
+    if len(tie_ids) > 1:
+        winner_auth_v = winner_auth
+        # Map id -> authority for fast lookup.
+        auth_by_id = {s[0]: s[1] for s in scored}
+        for tid in tie_ids:
+            if tid == winner_id:
+                continue
+            record_conflict(
+                workspace,
+                entity_key,
+                winner_id,
+                tid,
+                winner_auth_v,
+                auth_by_id[tid],
+            )
+
+    # is_current reflects whether the new row is *currently un-superseded*.
+    # When the new row ties with an existing winner, both stay live -- so
+    # is_current is True for the new row too.
+    return new_id, new_id in tie_ids
 
 
 def recall(
