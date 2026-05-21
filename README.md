@@ -120,5 +120,16 @@ python scripts/ingest_mcp.py https://my-mcp.example/mcp \
 
 ## Next phases
 
-- **4 (remaining)** — Phase 4 e2e assertions on memory-aware retrieval; a
-  watchable end-to-end demo script; scheduling; multi-tenancy hardening.
+- **4 (remaining)** — Phase 4 e2e assertions on memory-aware retrieval;
+  scheduling; multi-tenancy hardening.
+
+### Watch it all run
+
+A single watchable script that walks through every property -- dedup,
+ACL on chunks AND distilled memory, conflict-resolved write-back,
+memory-aware retrieval -- against a real Postgres, on a `demo` workspace
+that resets per run.
+
+```bash
+python scripts/demo.py
+```
