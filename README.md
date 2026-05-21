@@ -118,10 +118,27 @@ python scripts/ingest_mcp.py https://my-mcp.example/mcp \
     --workspace acme --header "Authorization: Bearer $MY_TOKEN"
 ```
 
+## memscope -- visual inspector
+
+A small FastAPI + Alpine.js UI for *seeing* what the memory layer does.
+First slice ships the **memory DAG view**: pick a workspace + entity, get
+an SVG graph of every memory row ever written for that entity, with
+`superseded_by` edges drawn out so conflict resolution is visible. Click
+a node for full content, provenance, confidence, and status.
+
+```bash
+pip install -e ".[memscope]"
+uvicorn memscope.app:app --reload
+# open http://localhost:8000
+```
+
+Read-only -- it inspects whatever's already in your Postgres. Pipeline,
+Search, and Ingest views from the design are not built yet.
+
 ## Next phases
 
-- **5** — Scheduling (periodic connector runs), multi-tenancy hardening,
-  cross-workspace audit tooling.
+- **5 (remaining)** — memscope Pipeline + Search + Ingest views;
+  scheduling (periodic connector runs); multi-tenancy hardening.
 
 ### Watch it all run
 

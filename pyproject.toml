@@ -14,7 +14,15 @@ dependencies = [
 # so the pipeline runs with zero API keys.
 voyage = ["voyageai>=0.2"]
 openai = ["openai>=1.0"]
+# memscope: web UI for inspecting the memory layer (memory DAG view).
+memscope = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["memlayer*"]
+include = ["memlayer*", "memscope*"]
+
+[tool.setuptools.package-data]
+memscope = ["static/*"]

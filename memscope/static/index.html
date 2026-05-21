@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>memscope -- memory DAG</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script defer src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>memscope</h1>
+    <span class="subtitle">memory DAG inspector -- pick a workspace + entity, watch conflicts resolve</span>
+  </header>
+
+  <main x-data="memscope()" x-init="init()">
+    <section class="controls">
+      <label>
+        workspace
+        <select x-model="workspace" @change="loadEntities()">
+          <option value="">(pick one)</option>
+          <template x-for="w in wsList" :key="w">
+            <option :value="w" x-text="w"></option>
+          </template>
+        </select>
+      </label>
+
+      <label>
+        entity_key
+        <select x-model="entityKey" @change="loadDag()" :disabled="!workspace">
+          <option value="">(pick one)</option>
+          <template x-for="e in entityList" :key="e.entity_key">
+            <option :value="e.entity_key"
+                    x-text="`${e.entity_key} (${e.versions} version${e.versions === 1 ? '' : 's'})`">
+            </option>
+          </template>
+        </select>
+      </label>
+
+      <button @click="loadDag()" :disabled="!workspace || !entityKey">reload</button>
+    </section>
+
+    <section x-show="error" class="error" x-text="error"></section>
+
+    <template x-if="dag">
+      <section class="dag-host">
+        <div class="legend">
+          <span><span class="dot human"></span>human</span>
+          <span><span class="dot system"></span>system</span>
+          <span><span class="dot agent"></span>agent</span>
+          <span><span class="dot current"></span>current (no outgoing supersede edge)</span>
+          <span class="hint">click a node for full content</span>
+        </div>
+
+        <template x-if="dag.nodes.length === 0">
+          <p class="empty">no memory rows for this entity</p>
+        </template>
+
+        <div class="dag-layout" x-show="dag.nodes.length > 0">
+          <div class="dag-svg" x-html="renderSvg()"></div>
+          <aside class="detail" x-show="selected">
+            <h3 x-text="`#${selected?.id}`"></h3>
+            <p><span>source</span><strong x-text="`${selected?.source_type}:${selected?.source_id}`"></strong></p>
+            <p><span>confidence</span><strong x-text="selected?.confidence"></strong></p>
+            <p><span>created</span><strong x-text="selected?.created_at"></strong></p>
+            <p><span>status</span><strong x-text="selected?.is_current ? 'CURRENT' : 'superseded'"></strong></p>
+            <blockquote x-text="selected?.content"></blockquote>
+          </aside>
+        </div>
+      </section>
+    </template>
+  </main>
+</body>
+</html>
