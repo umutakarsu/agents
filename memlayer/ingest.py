@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from memlayer.chunking import chunk, content_hash
 from memlayer.db import connect
 from memlayer.embeddings import embed, model_name
+from memlayer.scrub import scrub
 
 
 @dataclass
@@ -27,13 +28,41 @@ class IngestStats:
     chunks: int = 0
     embeddings_computed: int = 0  # actual embedding calls (cost)
     embeddings_reused: int = 0  # dedup hits (saved cost)
+    scrubbed_chars: int = 0  # total chars replaced by the privacy filter
 
 
-def ingest(items: list[SourceItem], workspace: str) -> IngestStats:
+def ingest(
+    items: list[SourceItem], workspace: str, *, scrub_pii: bool = False
+) -> IngestStats:
+    """Run the ingest pipeline. ``scrub_pii`` opts into emails / SSNs /
+    credit-card scrubbing on top of the always-on secret matchers; see
+    ``memlayer.scrub`` for the matcher list."""
     stats = IngestStats()
     with connect() as conn, conn.cursor() as cur:
         for item in items:
             stats.items += 1
+
+            # Privacy filter: scrub BEFORE chunking. The scrubbed text is
+            # what gets hashed, embedded, indexed, and returned by search.
+            # The raw_events payload still carries whatever the connector
+            # handed us -- that's the source of truth log and the place an
+            # admin can audit, but it's not what we embed. The substantive
+            # leak surface (chunks + embeddings + FTS index) sees only the
+            # scrubbed text.
+            scrubbed_text, redactions = scrub(item.text, scrub_pii=scrub_pii)
+            if redactions:
+                for r in redactions:
+                    stats.scrubbed_chars += r.chars
+                    cur.execute(
+                        """
+                        INSERT INTO redactions_log
+                            (workspace, source, source_id, kind, count)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (workspace, item.source, item.source_id, r.kind, r.count),
+                    )
+                item.text = scrubbed_text
+
             cur.execute(
                 """
                 INSERT INTO raw_events
