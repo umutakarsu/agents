@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>memlayer — what we're building</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 15% 10%, rgba(106,166,255,0.10), transparent 55%),
+        radial-gradient(circle at 85% 90%, rgba(167,139,250,0.10), transparent 55%),
+        #0b0d12;
+      color: #e5e7eb;
+      min-height: 100vh;
+      padding: 48px 32px 80px;
+      line-height: 1.5;
+    }
+    .board { max-width: 1500px; margin: 0 auto; }
+
+    .board-header { text-align: center; margin-bottom: 40px; }
+    .board-eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+      color: #a78bfa; margin-bottom: 18px;
+    }
+    .board-eyebrow::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%; background: #a78bfa;
+    }
+    .board-title {
+      font-family: "Charter", "Iowan Old Style", "Georgia", serif;
+      font-size: clamp(36px, 5vw, 56px); font-weight: 700; letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #fff 0%, #c4b5fd 50%, #6aa6ff 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      margin-bottom: 16px; line-height: 1.1;
+    }
+    .board-sub {
+      font-size: 18px; color: #94a3b8;
+      max-width: 720px; margin: 0 auto;
+    }
+
+    .pitch-card {
+      background:
+        linear-gradient(135deg, rgba(106,166,255,0.08), rgba(167,139,250,0.08)),
+        rgba(17, 21, 26, 0.6);
+      border: 1px solid rgba(167, 139, 250, 0.22);
+      padding: 32px 40px;
+      border-radius: 16px;
+      max-width: 900px;
+      margin: 0 auto 56px;
+      font-size: 18px; line-height: 1.65;
+      text-align: center; color: #cbd5e1;
+      backdrop-filter: blur(8px);
+    }
+    .pitch-card strong { color: #fff; }
+    .pitch-em { color: #fff; font-weight: 600; }
+
+    .legend {
+      display: flex; gap: 24px; justify-content: center; flex-wrap: wrap;
+      margin: 24px 0 56px;
+      font-size: 13px; color: #94a3b8;
+    }
+    .legend-item { display: inline-flex; align-items: center; gap: 8px; }
+    .legend-dot {
+      display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+    }
+    .legend-dot.done { background: #4c9a7a; }
+    .legend-dot.eng  { background: #b88a37; }
+    .legend-dot.moat { background: #a78bfa; }
+    .legend-dot.now  { background: #f0a83a; box-shadow: 0 0 0 2px rgba(240,168,58,0.3); }
+
+    .section { margin-bottom: 64px; }
+    .section-header {
+      display: flex; align-items: baseline; gap: 14px;
+      margin-bottom: 12px; padding-bottom: 12px;
+      border-bottom: 1px dashed rgba(255,255,255,0.10);
+    }
+    .section-label {
+      font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+      padding: 4px 10px; border-radius: 4px; font-weight: 700;
+    }
+    .section-label.done { background: rgba(76,154,122,0.18); color: #6ee7b7; border: 1px solid rgba(76,154,122,0.35); }
+    .section-label.eng  { background: rgba(184,138,55,0.18); color: #fbbf24; border: 1px solid rgba(184,138,55,0.35); }
+    .section-label.moat { background: rgba(167,139,250,0.18); color: #c4b5fd; border: 1px solid rgba(167,139,250,0.35); }
+    .section-title { font-size: 24px; font-weight: 600; color: #f1f5f9; }
+    .section-blurb {
+      font-size: 15px; color: #94a3b8; max-width: 780px;
+      margin: 0 0 28px; line-height: 1.6;
+    }
+
+    .stickies {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      gap: 22px;
+    }
+
+    .sticky {
+      position: relative; padding: 22px;
+      border-radius: 10px; min-height: 156px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.5), 0 10px 30px rgba(0,0,0,0.35);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      display: flex; flex-direction: column;
+    }
+    .sticky:nth-child(4n+1) { transform: rotate(-0.9deg); }
+    .sticky:nth-child(4n+2) { transform: rotate(0.6deg); }
+    .sticky:nth-child(4n+3) { transform: rotate(-0.3deg); }
+    .sticky:nth-child(4n)   { transform: rotate(0.4deg); }
+    .sticky:hover { transform: rotate(0deg) scale(1.025); z-index: 5;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.5), 0 16px 40px rgba(0,0,0,0.5); }
+
+    .sticky.done {
+      background: linear-gradient(135deg, #2d5a3d, #1f3f29);
+      color: #d1fae5; border: 1px solid rgba(110,231,183,0.28);
+    }
+    .sticky.eng {
+      background: linear-gradient(135deg, #5a3e1c, #3f2d14);
+      color: #fef3c7; border: 1px solid rgba(251,191,36,0.28);
+    }
+    .sticky.moat {
+      background: linear-gradient(135deg, #4a2b6e, #2d1a45);
+      color: #ede9fe; border: 1px solid rgba(196,181,253,0.28);
+    }
+    .sticky.now {
+      background: linear-gradient(135deg, #7a2e1a, #4a1b10);
+      color: #fed7aa; border: 2px solid #f0a83a;
+      box-shadow:
+        0 0 0 4px rgba(240,168,58,0.12),
+        0 1px 2px rgba(0,0,0,0.5),
+        0 10px 30px rgba(240,168,58,0.18);
+    }
+
+    .sticky-tag {
+      display: inline-block;
+      font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 3px;
+      background: rgba(0,0,0,0.28);
+      margin-bottom: 14px; font-weight: 700;
+      align-self: flex-start;
+    }
+    .sticky-title {
+      font-size: 17px; font-weight: 600;
+      margin-bottom: 10px; line-height: 1.32;
+    }
+    .sticky-body {
+      font-size: 13.5px; line-height: 1.55;
+      opacity: 0.92;
+    }
+
+    .footer {
+      text-align: center; margin-top: 56px; padding-top: 28px;
+      border-top: 1px dashed rgba(255,255,255,0.08);
+      color: #64748b; font-size: 13px;
+    }
+    .footer a { color: #94a3b8; text-decoration: none; border-bottom: 1px dashed #475569; }
+    .footer a:hover { color: #cbd5e1; }
+
+    @media (max-width: 720px) {
+      body { padding: 24px 16px 48px; }
+      .pitch-card { padding: 24px 20px; font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="board">
+
+    <header class="board-header">
+      <div class="board-eyebrow">memlayer · what we're building</div>
+      <h1 class="board-title">A shared memory for every AI tool in your company.</h1>
+      <p class="board-sub">
+        Plug it in once. Every AI tool reads and writes from the same place — without leaking what shouldn't be shared.
+      </p>
+    </header>
+
+    <div class="pitch-card">
+      <strong>Today</strong>, every AI tool in your company starts from zero. They don't share knowledge.
+      They redo each other's work. They leak data they shouldn't.<br/><br/>
+      <strong>What we're building</strong> is the
+      <span class="pitch-em">one trustworthy memory underneath all of them</span>
+      &mdash; connecting a new AI tool means it instantly knows your company,
+      and only sees what it's allowed to see.
+    </div>
+
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot done"></span>Done</span>
+      <span class="legend-item"><span class="legend-dot now"></span>Doing next</span>
+      <span class="legend-item"><span class="legend-dot eng"></span>To make it real</span>
+      <span class="legend-item"><span class="legend-dot moat"></span>What makes us hard to copy</span>
+    </div>
+
+    <!-- ============== DONE ============== -->
+    <section class="section">
+      <header class="section-header">
+        <span class="section-label done">✓ Done</span>
+        <h2 class="section-title">What's already built</h2>
+      </header>
+      <p class="section-blurb">
+        Foundations. Each one is a real promise the system can keep right now &mdash; you can demo any of them on a laptop today.
+      </p>
+
+      <div class="stickies">
+
+        <article class="sticky done">
+          <span class="sticky-tag">The foundation</span>
+          <h3 class="sticky-title">Write things down. They stay written.</h3>
+          <p class="sticky-body">Every AI tool, every human, every connector can drop facts into one shared place — and nothing ever quietly disappears.</p>
+        </article>
+
+        <article class="sticky done">
+          <span class="sticky-tag">Cost</span>
+          <h3 class="sticky-title">Don't pay twice for the same thing.</h3>
+          <p class="sticky-body">If two tools both notice the same paragraph, we only process it once. Re-ingest the same doc = zero new cost.</p>
+        </article>
+
+        <article class="sticky done">
+          <span class="sticky-tag">Trust</span>
+          <h3 class="sticky-title">Permissions you can't leak around.</h3>
+          <p class="sticky-body">The "who's allowed to see this?" check happens deep in the database, before any search results are ranked. Forbidden content is never returned — not even by accident.</p>
+        </article>
+
+        <article class="sticky done">
+          <span class="sticky-tag">Conflict</span>
+          <h3 class="sticky-title">Humans always win arguments with AI.</h3>
+          <p class="sticky-body">When an AI guesses wrong and a human corrects it, the system literally cannot let a later AI guess overwrite the correction.</p>
+        </article>
+
+        <article class="sticky done">
+          <span class="sticky-tag">Search</span>
+          <h3 class="sticky-title">Find the right info even when the words don't match.</h3>
+          <p class="sticky-body">Search by meaning and by exact words at the same time, fused together — so you don't miss the right answer just because someone phrased it differently.</p>
+        </article>
+
+        <article class="sticky done">
+          <span class="sticky-tag">Memory care</span>
+          <h3 class="sticky-title">Old wrong guesses forget themselves.</h3>
+          <p class="sticky-body">A confident statement that nobody confirms slowly fades. A statement that gets reinforced stays sharp. The system manages its own attic.</p>
+        </article>
+
+        <article class="sticky done">
+          <span class="sticky-tag">Safety</span>
+          <h3 class="sticky-title">Strip secrets at the door.</h3>
+          <p class="sticky-body">If a Slack thread accidentally contains an API key or password, we never store it. Prevent leaks at ingest — much cheaper than cleanup.</p>
+        </article>
+
+        <article class="sticky done">
+          <span class="sticky-tag">Open standard</span>
+          <h3 class="sticky-title">Any AI tool plugs in via one protocol.</h3>
+          <p class="sticky-body">Claude Code, Cursor, any MCP-speaking client can read and write to our memory through a standard interface.</p>
+        </article>
+
+        <article class="sticky done">
+          <span class="sticky-tag">See it work</span>
+          <h3 class="sticky-title">A web dashboard to see it all.</h3>
+          <p class="sticky-body">Landing page, three demo scenarios, three inspector views, a 2-slide deck — all at one URL. Anyone can play with it without a tutorial.</p>
+        </article>
+
+        <article class="sticky done">
+          <span class="sticky-tag">Battle-tested</span>
+          <h3 class="sticky-title">We attacked our own system and patched the holes.</h3>
+          <p class="sticky-body">Ran a full security audit, found 3 critical and 5 high-severity bugs, fixed all of them. The substrate's trust promises hold up.</p>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ============== NEXT (engineering) ============== -->
+    <section class="section">
+      <header class="section-header">
+        <span class="section-label eng">→ Next</span>
+        <h2 class="section-title">What's left to make it a real product</h2>
+      </header>
+      <p class="section-blurb">
+        Engineering work — not deep research, just the things any serious team needs before showing it to a real customer.
+        The first one (auth) blocks everything else on this row.
+      </p>
+
+      <div class="stickies">
+
+        <article class="sticky now">
+          <span class="sticky-tag">Doing next · Blocking</span>
+          <h3 class="sticky-title">Make tools log in for real.</h3>
+          <p class="sticky-body">Today anyone hitting our API can claim to be anyone. Add proper authentication so the permission system can actually be trusted on a real network — not just on a laptop.</p>
+        </article>
+
+        <article class="sticky eng">
+          <span class="sticky-tag">Real data</span>
+          <h3 class="sticky-title">Plug into Slack, Notion, Linear.</h3>
+          <p class="sticky-body">Today we have toy docs + GitHub. A real product needs real connectors to the tools your team actually uses.</p>
+        </article>
+
+        <article class="sticky eng">
+          <span class="sticky-tag">Autopilot</span>
+          <h3 class="sticky-title">Keep pulling new data without supervision.</h3>
+          <p class="sticky-body">Today ingestion is manual. Add a scheduler so each connector runs on its own — and surfaces failures clearly when something breaks.</p>
+        </article>
+
+        <article class="sticky eng">
+          <span class="sticky-tag">Multi-customer</span>
+          <h3 class="sticky-title">Two companies' data never bleed into each other.</h3>
+          <p class="sticky-body">Harden the tenant boundary. Today it's a string column; production needs real isolation guarantees auditors will sign off on.</p>
+        </article>
+
+        <article class="sticky eng">
+          <span class="sticky-tag">Visibility</span>
+          <h3 class="sticky-title">Show what's flowing in.</h3>
+          <p class="sticky-body">A live view of every connector — what it pulled, when, what failed, what got scrubbed. Makes the platform feel alive instead of static.</p>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ============== MOAT (research-hard) ============== -->
+    <section class="section">
+      <header class="section-header">
+        <span class="section-label moat">★ The moat</span>
+        <h2 class="section-title">What makes us hard to copy</h2>
+      </header>
+      <p class="section-blurb">
+        Four genuinely hard problems nobody has solved together. This is what we said in the pitch we're raising to build.
+        Each one is a separate research project. The order below is the order we'd tackle them.
+      </p>
+
+      <div class="stickies">
+
+        <article class="sticky moat">
+          <span class="sticky-tag">#1 · After auth</span>
+          <h3 class="sticky-title">Know that "Ali in Slack" and "ali@acme.com" are the same person.</h3>
+          <p class="sticky-body">And don't get it wrong — because a bad guess unlocks one person's restricted content to a stranger. We'll build this with confidence scores and human review for risky merges.</p>
+        </article>
+
+        <article class="sticky moat">
+          <span class="sticky-tag">#3 · Builds on #1</span>
+          <h3 class="sticky-title">When two humans disagree, model who has the right to override whom.</h3>
+          <p class="sticky-body">Today "human beats AI" is enough. Tomorrow: a security lead's "this is wrong" overrides an engineer's "this is right" — but only for security-shaped facts. Real governance.</p>
+        </article>
+
+        <article class="sticky moat">
+          <span class="sticky-tag">#2</span>
+          <h3 class="sticky-title">Turn 1,000 messages into 1 honest summary — with receipts.</h3>
+          <p class="sticky-body">Every claim in the summary traceable back to a specific source. A future correction updates only the affected evidence. The hard part: don't make things up.</p>
+        </article>
+
+        <article class="sticky moat">
+          <span class="sticky-tag">#4 · Deepest</span>
+          <h3 class="sticky-title">Learn from every company's data — without any of them seeing each other's.</h3>
+          <p class="sticky-body">The platform gets smarter from every workspace, but no workspace's content ever bleeds into another. Federated learning with mathematical privacy guarantees.</p>
+        </article>
+
+      </div>
+    </section>
+
+    <div class="footer">
+      memlayer roadmap · <a href="/">live demo</a> · <a href="/pitch">pitch deck</a><br/>
+      Bold gold sticky = doing now. Green = shipped. Purple = the moat. Amber = engineering to make it real.
+    </div>
+
+  </div>
+</body>
+</html>

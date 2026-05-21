@@ -122,3 +122,8 @@ def index() -> FileResponse:
 @app.get("/pitch")
 def pitch() -> FileResponse:
     return FileResponse(str(STATIC / "pitch.html"))
+
+
+@app.get("/board")
+def board() -> FileResponse:
+    return FileResponse(str(STATIC / "board.html"))
