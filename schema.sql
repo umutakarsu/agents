@@ -228,3 +228,28 @@ CREATE TABLE IF NOT EXISTS identity_merge_log (
     merged_by TEXT,                              -- 'auto', or user identifier
     reversed_at TIMESTAMPTZ
 );
+
+-- Phase 8: semantic compression with auditable lineage.
+-- An episodic summary is derived from N working rows. Each sentence in the
+-- summary is verbatim from a source row, so lineage is by construction.
+
+-- Track which working row got folded into which episodic summary so we can
+-- evict the original AND know what the summary cited.
+ALTER TABLE memory
+    ADD COLUMN IF NOT EXISTS compressed_into BIGINT REFERENCES memory(id);
+ALTER TABLE memory
+    ADD COLUMN IF NOT EXISTS needs_recompression BOOLEAN NOT NULL DEFAULT false;
+
+-- Per-sentence lineage: for each sentence in an episodic summary,
+-- which source row did it come from? Verbatim text, exact source.
+CREATE TABLE IF NOT EXISTS summary_lineage (
+    id BIGSERIAL PRIMARY KEY,
+    summary_id BIGINT NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
+    sentence_index INT NOT NULL,
+    sentence TEXT NOT NULL,
+    source_row_id BIGINT NOT NULL REFERENCES memory(id),
+    extracted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (summary_id, sentence_index)
+);
+CREATE INDEX IF NOT EXISTS summary_lineage_source_idx
+    ON summary_lineage (source_row_id);

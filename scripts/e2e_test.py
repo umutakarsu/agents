@@ -11,6 +11,7 @@ conflict-resolved write-back, and memory-aware retrieval.
 import sys
 from datetime import datetime, timezone
 
+from memlayer.compress import compress, lineage
 from memlayer.connectors.local_files import read_dir
 from memlayer.db import connect
 from memlayer.ingest import SourceItem, ingest
@@ -30,9 +31,13 @@ def check(name: str, cond: bool) -> None:
 
 def reset() -> None:
     with connect() as conn, conn.cursor() as cur:
+        # summary_lineage references memory(id); CASCADE on the TRUNCATE
+        # would normally handle it but we include it explicitly so the
+        # reset survives the Phase 8 schema being applied or not.
         cur.execute(
-            "TRUNCATE memory, chunk_acl, embeddings, event_chunks, "
-            "chunks, raw_events, redactions_log RESTART IDENTITY CASCADE"
+            "TRUNCATE summary_lineage, memory, chunk_acl, embeddings, "
+            "event_chunks, chunks, raw_events, redactions_log "
+            "RESTART IDENTITY CASCADE"
         )
         conn.commit()
 
@@ -201,6 +206,96 @@ def main() -> None:
         )
         benign_log_rows = cur.fetchone()[0]
     check("benign ingest writes no redaction log rows", benign_log_rows == 0)
+
+    print("Phase 8: extractive compression with auditable lineage")
+    # Five working rows with shared vocabulary so centrality picks meaningful
+    # sentences. Distinct facts, but they all talk about "retrieval", "latency"
+    # and "vector arm" -- so the centrality scorer has signal to work with.
+    compress_entity = "topic:compression-test"
+    seeded = []
+    seed_sources = [
+        "The retrieval system is slow today.",
+        "Retrieval queries take 8 seconds at peak load.",
+        "The vector arm dominates the retrieval latency.",
+        "Vector arm cost is about 6 seconds of the 8 second total.",
+        "Plan: profile the vector arm and add an HNSW index.",
+    ]
+    for i, content in enumerate(seed_sources):
+        mid, _ = remember(
+            WS, compress_entity, content,
+            "agent", f"watcher-{i}",
+            confidence=0.7,
+            tier="working",
+        )
+        seeded.append(mid)
+
+    result = compress(WS, compress_entity)
+    check("compress returned a summary_id",
+          result.summary_id is not None)
+    check("compress recorded all 5 source rows in derived_from",
+          sorted(result.source_row_ids) == sorted(seeded))
+    check("compression_ratio < 1.0 (it actually compressed)",
+          result.compression_ratio < 1.0)
+
+    # The new episodic row exists and points at all 5 sources.
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT tier, derived_from, content FROM memory WHERE id = %s",
+            (result.summary_id,),
+        )
+        summary_row = cur.fetchone()
+    check("episodic summary row is tier='episodic'",
+          summary_row is not None and summary_row[0] == "episodic")
+    check("episodic.derived_from is all 5 source IDs",
+          sorted(summary_row[1]) == sorted(seeded))
+
+    # summary_lineage rows: one per sentence, each pointing at one of the
+    # five sources. This is the auditable trail.
+    lineage_rows = lineage(result.summary_id)
+    check("summary_lineage has one row per extracted sentence",
+          len(lineage_rows) == result.num_sentences and len(lineage_rows) > 0)
+    check("every lineage row points at one of the 5 seeded sources",
+          all(r.source_row_id in seeded for r in lineage_rows))
+
+    # THE killer property: no hallucination by construction. Every
+    # sentence in the summary appears verbatim in at least one source row.
+    source_contents = {sid: c for sid, c in zip(seeded, seed_sources)}
+    summary_content = summary_row[2]
+    verbatim_ok = True
+    for lr in lineage_rows:
+        cited = source_contents[lr.source_row_id]
+        if lr.sentence not in cited:
+            verbatim_ok = False
+            break
+        if lr.sentence not in summary_content:
+            verbatim_ok = False
+            break
+    check(
+        "no-hallucination invariant: every summary sentence appears "
+        "verbatim in its cited source row AND in the summary content",
+        verbatim_ok,
+    )
+
+    # Source rows are flagged compressed_into=<summary_id>.
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, compressed_into FROM memory "
+            "WHERE id = ANY(%s) ORDER BY id",
+            (seeded,),
+        )
+        flags = cur.fetchall()
+    check(
+        "every source row is flagged compressed_into=<summary_id>",
+        len(flags) == len(seeded)
+        and all(row[1] == result.summary_id for row in flags),
+    )
+
+    # Re-running compress() is a no-op (all rows are already compressed).
+    again = compress(WS, compress_entity)
+    check(
+        "re-running compress() on the same entity is a no-op",
+        again.summary_id is None and again.skipped_reason is not None,
+    )
 
     print()
     if _FAILS:
