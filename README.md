@@ -223,3 +223,47 @@ that resets per run.
 ```bash
 python scripts/demo.py
 ```
+
+## Phase 8: Semantic Compression with Lineage
+
+N raw `working` rows about the same entity get folded into one durable
+`episodic` summary -- **and every sentence in that summary is traceable
+back to the exact source row it came from**. The lineage is by
+construction, not by post-hoc alignment: the summary is *extractive*
+(verbatim sentences picked from the input), so there is no model output
+to attribute and no hallucination is possible.
+
+The pipeline (`memlayer/compress.py`):
+
+1. Group working rows by `(workspace, entity_key)`.
+2. Split each row's content into sentences, score by word-overlap
+   centrality (poor man's TextRank), pick the top
+   `min(5, ceil(0.25 * total_sentences))`.
+3. Write an `episodic` row whose `content` is the picked sentences in
+   original order, with `derived_from` listing every source row.
+4. Insert one row per sentence into `summary_lineage` -- exact text +
+   exact source row id.
+5. Flag source rows `compressed_into=<summary_id>` so the existing
+   `evict_stale` job can purge them later. The audit trail stays whole.
+
+ACL handling is *restrictive*: the summary's `allowed_principals` is the
+intersection of its sources' principals. Compression never widens
+access.
+
+```bash
+# Compress one entity:
+python scripts/compress.py --workspace acme --entity topic:perf-issue
+# Compress every entity in a workspace with >=3 un-compressed working rows:
+python scripts/compress.py --workspace acme
+# Score-and-report without writing:
+python scripts/compress.py --workspace acme --dry-run
+```
+
+When a source row is superseded or updated, call
+`invalidate_summaries_for(source_row_id)` -- every summary that cited the
+row is flagged `needs_recompression=true` and a future `compress()` run
+will regenerate it.
+
+The e2e test asserts the killer invariant directly: **every sentence in
+the summary appears verbatim in its cited source row**. No hallucination
+by construction.
