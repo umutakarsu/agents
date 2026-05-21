@@ -103,9 +103,22 @@ python scripts/recall.py acme person:ali --history   # full audit trail
 | `memlayer/ingest.py` | The pipeline + dedup gate |
 | `memlayer/retrieval.py` | Hybrid vector+FTS, RRF fusion, ACL pre-filter |
 | `memlayer/writeback.py` | Append-only memory + conflict resolution |
-| `memlayer/connectors/` | Thin source adapters (local files today) |
+| `memlayer/connectors/` | Thin source adapters (local files, GitHub, MCP) |
+
+### More connectors (Phase 4)
+
+Same pipeline, same dedup gate, same ACL story -- just a different edge.
+
+```bash
+# Public GitHub repo (anonymous; set GITHUB_TOKEN for private / higher rate limits).
+python scripts/ingest_github.py umutakarsu/agents --workspace acme
+
+# An MCP server (Streamable HTTP). Pass auth via repeatable --header.
+python scripts/ingest_mcp.py https://my-mcp.example/mcp \
+    --workspace acme --header "Authorization: Bearer $MY_TOKEN"
+```
 
 ## Next phases
 
-- **4** — More connectors (GitHub, MCP), scheduling, multi-tenancy hardening,
-  retrieval that also reads back from `memory` (not just raw chunks).
+- **4 (remaining)** — Phase 4 e2e assertions on memory-aware retrieval; a
+  watchable end-to-end demo script; scheduling; multi-tenancy hardening.
