@@ -7,11 +7,13 @@ precedence is (source rank, confidence, recency). Human overrides system
 overrides agent; then higher confidence; then newer. Exactly one memory per
 entity is "current" (superseded_by IS NULL)."""
 
+import math
 from dataclasses import dataclass
 
 from memlayer.db import connect
 
 _SOURCE_RANK = {"human": 3, "system": 2, "agent": 1}
+_VALID_SOURCE_TYPES = frozenset(_SOURCE_RANK.keys())
 
 
 @dataclass
@@ -42,6 +44,23 @@ def remember(
     """Append a memory. Returns (memory_id, is_current). is_current is False
     when an existing memory outranks this one -- the new row is still stored
     for audit, but immediately superseded."""
+    # Validate source_type and confidence here in addition to the schema
+    # CHECK constraints so callers get a clear ValueError before the
+    # database round-trip. source_type controls precedence (human > system
+    # > agent), so an arbitrary string would either land at rank 0 or, if
+    # the schema check were missing, let an attacker claim 'human'.
+    # confidence=inf/NaN would short-circuit the (rank, conf, id) tuple
+    # comparison in _precedence.
+    if source_type not in _VALID_SOURCE_TYPES:
+        raise ValueError(
+            f"source_type must be one of {sorted(_VALID_SOURCE_TYPES)}, "
+            f"got {source_type!r}"
+        )
+    if not math.isfinite(confidence) or not (0.0 <= confidence <= 1.0):
+        raise ValueError(
+            f"confidence must be a finite float in [0.0, 1.0], "
+            f"got {confidence!r}"
+        )
     derived_from = derived_from or []
     allowed_principals = allowed_principals or ["group:all"]
     with connect() as conn, conn.cursor() as cur:

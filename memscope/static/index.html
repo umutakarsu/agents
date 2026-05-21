@@ -173,6 +173,19 @@
 
           <div class="field">
             <label>
+              Who's asking
+              <span class="tip" data-tip="Principals are the identities you're asking on behalf of (users + groups). Entities and memory rows only show up if their ACL allows at least one of these.">
+                <span class="tip-paren">(principals)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+              <span class="field-hint">comma-separated</span>
+            </label>
+            <input type="text" x-model="dagPrincipals" placeholder="group:all"
+                   @change="loadEntities()" />
+          </div>
+
+          <div class="field">
+            <label>
               Person or topic
               <span class="tip" data-tip="The stable identifier for the thing this memory is about (e.g. person:ali).">
                 <span class="tip-paren">(entity_key)</span>
@@ -475,6 +488,18 @@
               </template>
             </select>
           </div>
+          <div class="field">
+            <label>
+              Who's asking
+              <span class="tip" data-tip="Principals are the identities you're asking on behalf of. Chunk and memory counts only include rows whose ACL allows at least one of these.">
+                <span class="tip-paren">(principals)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+              <span class="field-hint">comma-separated</span>
+            </label>
+            <input type="text" x-model="pipelinePrincipals" placeholder="group:all"
+                   @change="loadStats()" />
+          </div>
           <button class="btn ghost" @click="loadStats()" :disabled="!pipelineWorkspace">refresh stats</button>
         </div>
 
@@ -501,8 +526,10 @@
                 </div>
               </div>
               <div class="metric panel">
-                <div class="metric-num" x-text="stats.total_embeddings.toLocaleString()"></div>
-                <div class="metric-label">Total embeddings stored</div>
+                <div class="metric-num" x-text="stats.total_embeddings_global.toLocaleString()"></div>
+                <div class="metric-label">Total embeddings stored
+                  <span class="metric-paren">(global, content-addressed)</span>
+                </div>
               </div>
               <div class="metric panel">
                 <div class="metric-num" x-text="stats.memory_rows.toLocaleString()"></div>

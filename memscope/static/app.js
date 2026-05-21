@@ -38,6 +38,12 @@ function memscope() {
     workspace: '',
     entityList: [],
     entityKey: '',
+    // DAG and Pipeline used to call the API without a principals string,
+    // which let any caller enumerate restricted entities and read restricted
+    // memory rows. The server now requires principals; the UI defaults to
+    // group:all (least-privileged) and lets the user widen via the "Who's
+    // asking" field.
+    dagPrincipals: 'group:all',
     dag: null,
     selected: null,
     dagError: '',
@@ -54,6 +60,7 @@ function memscope() {
 
     // ---------- Pipeline view ----------
     pipelineWorkspace: '',
+    pipelinePrincipals: 'group:all',
     stats: null,
     pipelineError: '',
     ingestLoading: false,
@@ -105,6 +112,8 @@ function memscope() {
     async runScenarioA() {
       this.tab = 'dag';
       this.workspace = 'acme';
+      // person:ali is public; group:all is enough to load the full DAG.
+      this.dagPrincipals = 'group:all';
       // loadEntities clears entityKey & dag; we then set entityKey and load.
       await this.loadEntities();
       this.entityKey = 'person:ali';
@@ -138,6 +147,7 @@ function memscope() {
     async runScenarioC() {
       this.tab = 'pipeline';
       this.pipelineWorkspace = 'acme';
+      this.pipelinePrincipals = 'group:all';
       this.pipelineStoryActive = true;
       this.pipelineBannerDismissed = true;
       this.landingMode = false;
@@ -156,6 +166,14 @@ function memscope() {
     // =====================================================
     // DAG view actions
     // =====================================================
+    get dagPrincipalsCsv() {
+      // Same CSV shape /api/search uses; default to group:all if blank so
+      // a stray empty input doesn't break the call.
+      const v = (this.dagPrincipals || '').split(',')
+        .map(s => s.trim()).filter(Boolean).join(',');
+      return v || 'group:all';
+    },
+
     async loadEntities() {
       this.entityKey = '';
       this.entityList = [];
@@ -164,8 +182,10 @@ function memscope() {
       this.dagError = '';
       if (!this.workspace) return;
       try {
-        const r = await fetch(`/api/entities?workspace=${encodeURIComponent(this.workspace)}`)
-          .then(this._json);
+        const r = await fetch(
+          `/api/entities?workspace=${encodeURIComponent(this.workspace)}`
+          + `&principals=${encodeURIComponent(this.dagPrincipalsCsv)}`
+        ).then(this._json);
         this.entityList = r.entities || [];
       } catch (e) {
         this.dagError = `loading entities: ${e.message}`;
@@ -179,6 +199,7 @@ function memscope() {
       try {
         const r = await fetch(
           `/api/memory/${encodeURIComponent(this.workspace)}/${encodeURIComponent(this.entityKey)}`
+          + `?principals=${encodeURIComponent(this.dagPrincipalsCsv)}`
         ).then(this._json);
         this.dag = r;
       } catch (e) {
@@ -234,6 +255,12 @@ function memscope() {
     // =====================================================
     // Pipeline view actions
     // =====================================================
+    get pipelinePrincipalsCsv() {
+      const v = (this.pipelinePrincipals || '').split(',')
+        .map(s => s.trim()).filter(Boolean).join(',');
+      return v || 'group:all';
+    },
+
     async loadStats() {
       this.pipelineError = '';
       this.stats = null;
@@ -241,6 +268,7 @@ function memscope() {
       try {
         const r = await fetch(
           `/api/pipeline/stats?workspace=${encodeURIComponent(this.pipelineWorkspace)}`
+          + `&principals=${encodeURIComponent(this.pipelinePrincipalsCsv)}`
         ).then(this._json);
         this.stats = r;
       } catch (e) {
@@ -314,13 +342,20 @@ function memscope() {
       const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
 
       // Nodes: layered headers with mono ID + sans badges, then mono content.
+      // Every string field that lands inside an HTML/SVG attribute is run
+      // through esc(). source_type in particular is attacker-influenceable
+      // (any writer can call remember() with an arbitrary string today),
+      // and was previously interpolated *raw* into class="node ${...}" and
+      // class="chip-bg src-${...}" -- a `class="agent" onclick="..."` payload
+      // would have escaped attribute context and landed an XSS.
       const nodeSvg = dag.nodes.map(n => {
         const { x, y } = pos[n.id];
-        const cls = `node ${n.source_type}${n.is_current ? ' current' : ' superseded'}`;
+        const safeSrc = esc(n.source_type);
+        const cls = `node ${safeSrc}${n.is_current ? ' current' : ' superseded'}`;
         // Badge layout (left to right): #id (mono) -- SOURCE chip -- confidence chip -- status
         // We draw everything as <text>/<rect> -- no <foreignObject> to keep export simple.
         const idText = `#${n.id}`;
-        const srcText = n.source_type.toUpperCase();
+        const srcText = String(n.source_type).toUpperCase();
         // Display confidence as a percentage in plain language.
         const confPct = Math.round((n.confidence || 0) * 100);
         const confText = `${confPct}%`;
@@ -343,7 +378,7 @@ function memscope() {
 
             <text x="${idX}" y="${y + 22}" class="id">${esc(idText)}</text>
 
-            <rect class="chip-bg src-${n.source_type}" x="${srcChipX}" y="${y + 10}"
+            <rect class="chip-bg src-${safeSrc}" x="${srcChipX}" y="${y + 10}"
                   width="${srcChipW}" height="18" rx="9" ry="9" />
             <text x="${srcChipX + srcChipW / 2}" y="${y + 23}" class="chip-tx">${esc(srcText)}</text>
 
