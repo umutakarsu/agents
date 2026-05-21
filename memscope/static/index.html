@@ -16,21 +16,153 @@
         <h1>memscope</h1>
         <span class="subtitle">memory inspector</span>
       </div>
-      <nav class="tabs" role="tablist">
+      <nav class="tabs" role="tablist" x-show="!landingMode">
         <button class="tab" role="tab" :class="{ active: tab === 'dag' }" @click="tab = 'dag'">DAG</button>
         <button class="tab" role="tab" :class="{ active: tab === 'search' }" @click="tab = 'search'">Search</button>
         <button class="tab" role="tab" :class="{ active: tab === 'pipeline' }" @click="tab = 'pipeline'">Pipeline</button>
       </nav>
+      <div class="topbar-right">
+        <button class="btn scenario-btn" @click="showLanding()">
+          <span class="scenario-icon">&#9733;</span> Try a scenario
+        </button>
+      </div>
     </header>
 
-    <main class="content">
+    <!-- =========================== LANDING / STORY MODE =========================== -->
+    <main class="content" x-show="landingMode">
+      <section class="landing">
+        <div class="landing-hero">
+          <h2 class="landing-title">A memory layer you can actually trust.</h2>
+          <p class="landing-sub">
+            Three short scenarios. Each one proves a property a real AI memory layer
+            must have: <strong>honest conflict resolution</strong>, <strong>permissions you can't
+            leak around</strong>, and <strong>cost-aware re-ingest</strong>. Pick one to watch it land.
+          </p>
+        </div>
+
+        <div class="scenario-grid">
+
+          <!-- Scenario A -->
+          <button type="button" class="scenario-card" @click="runScenarioA()">
+            <div class="scenario-visual visual-dag" aria-hidden="true">
+              <div class="vis-node vis-agent"><span class="vis-chip">AGENT</span><span class="vis-conf">60%</span></div>
+              <div class="vis-arrow">&#8595;</div>
+              <div class="vis-node vis-human vis-current"><span class="vis-chip">HUMAN</span><span class="vis-conf">95%</span></div>
+              <div class="vis-arrow vis-blocked">&#8595; &#10006;</div>
+              <div class="vis-node vis-agent vis-faded"><span class="vis-chip">AGENT</span><span class="vis-conf">40%</span></div>
+            </div>
+            <h3 class="scenario-title">Watch a human correct an agent that got it wrong</h3>
+            <p class="scenario-sub">
+              Why low-confidence agent guesses can't overwrite a human's correction &mdash;
+              and we can prove it.
+            </p>
+            <div class="scenario-cta">Run scenario &rarr;</div>
+          </button>
+
+          <!-- Scenario B -->
+          <button type="button" class="scenario-card" @click="runScenarioB()">
+            <div class="scenario-visual visual-search" aria-hidden="true">
+              <div class="vis-query mono">"secret roadmap..."</div>
+              <div class="vis-row">
+                <div class="vis-asker vis-asker-blocked">
+                  <div class="vis-asker-label">group:all</div>
+                  <div class="vis-asker-result">&#10006; no result</div>
+                </div>
+                <div class="vis-asker vis-asker-allowed">
+                  <div class="vis-asker-label">group:exec</div>
+                  <div class="vis-asker-result">&#10004; sees it</div>
+                </div>
+              </div>
+            </div>
+            <h3 class="scenario-title">See the same question return different answers depending on who's asking</h3>
+            <p class="scenario-sub">
+              The permission filter runs inside the search, in SQL &mdash;
+              forbidden content is never ranked, never leaked.
+            </p>
+            <div class="scenario-cta">Run scenario &rarr;</div>
+          </button>
+
+          <!-- Scenario C -->
+          <button type="button" class="scenario-card" @click="runScenarioC()">
+            <div class="scenario-visual visual-pipeline" aria-hidden="true">
+              <div class="vis-doc">DOC</div>
+              <div class="vis-arrow">&rarr;</div>
+              <div class="vis-gate">
+                <div class="vis-gate-label">DEDUP GATE</div>
+                <div class="vis-gate-hash mono">#a3f9...</div>
+              </div>
+              <div class="vis-arrow">&rarr;</div>
+              <div class="vis-cost">
+                <div class="vis-cost-num">0</div>
+                <div class="vis-cost-label">new<br>embeddings</div>
+              </div>
+            </div>
+            <h3 class="scenario-title">Re-ingest a document &mdash; watch the system refuse to pay twice</h3>
+            <p class="scenario-sub">
+              Every chunk of content is keyed by a hash. Same content =
+              zero cost to re-ingest.
+            </p>
+            <div class="scenario-cta">Run scenario &rarr;</div>
+          </button>
+
+        </div>
+
+        <div class="landing-foot">
+          Or jump straight into a view:
+          <button class="link-btn" @click="jumpToTab('dag')">Memory DAG</button>
+          <button class="link-btn" @click="jumpToTab('search')">Search</button>
+          <button class="link-btn" @click="jumpToTab('pipeline')">Pipeline</button>
+        </div>
+      </section>
+    </main>
+
+    <main class="content" x-show="!landingMode">
 
       <!-- =========================== DAG VIEW =========================== -->
       <section x-show="tab === 'dag'" class="view">
 
+        <!-- One-sentence banner -->
+        <div class="view-banner" x-show="!dagBannerDismissed">
+          <span class="view-banner-icon">&#9432;</span>
+          <span class="view-banner-text">
+            This view shows the life of a single memory &mdash; how an agent's guess gets corrected
+            by a human, and why later agent guesses can't overwrite the correction.
+          </span>
+          <button class="view-banner-close" @click="dagBannerDismissed = true" aria-label="Dismiss">&times;</button>
+        </div>
+
+        <!-- Scenario narrative banner (only after running scenario A) -->
+        <div class="story-banner" x-show="dagStoryActive">
+          <div class="story-banner-head">
+            <span class="story-badge">SCENARIO</span>
+            <span class="story-title">Human correction wins</span>
+            <button class="view-banner-close" @click="dagStoryActive = false" aria-label="Dismiss">&times;</button>
+          </div>
+          <p class="story-body">
+            An agent first guessed <em>"Ali leads retrieval"</em> (confidence 60%). A human manager
+            corrected it to <em>"Ali leads Platform"</em> (confidence 95%). Later another agent guessed
+            <em>"Ali maybe left"</em> (40%) &mdash; and lost. The human's correction stays current.
+            The system literally cannot overwrite it.
+          </p>
+        </div>
+
+        <div class="view-header">
+          <div class="view-title-block">
+            <h2 class="view-title">Memory DAG</h2>
+            <p class="view-subtitle">How a single piece of memory was written, corrected, and ranked over time.</p>
+          </div>
+          <button class="help-link" @click="openHelp('dag')">? What am I looking at?</button>
+        </div>
+
         <div class="toolbar">
           <div class="field">
-            <label>workspace</label>
+            <label>
+              Team / project
+              <span class="tip" data-tip="A workspace is a tenant boundary. All memory is partitioned by workspace.">
+                <span class="tip-paren">(workspace)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+            </label>
             <select x-model="workspace" @change="loadEntities()">
               <option value="">(pick one)</option>
               <template x-for="w in wsList" :key="w">
@@ -40,7 +172,13 @@
           </div>
 
           <div class="field">
-            <label>entity_key</label>
+            <label>
+              Person or topic
+              <span class="tip" data-tip="The stable identifier for the thing this memory is about (e.g. person:ali).">
+                <span class="tip-paren">(entity_key)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+            </label>
             <select x-model="entityKey" @change="loadDag()" :disabled="!workspace">
               <option value="">(pick one)</option>
               <template x-for="e in entityList" :key="e.entity_key">
@@ -78,7 +216,7 @@
                     <div class="detail-head">
                       <span class="detail-id mono" x-text="`#${selected.id}`"></span>
                       <span class="chip" :class="`chip-${selected.source_type}`" x-text="selected.source_type.toUpperCase()"></span>
-                      <span class="chip chip-conf mono" x-text="`c=${selected.confidence}`"></span>
+                      <span class="chip chip-conf mono" x-text="`Confidence: ${Math.round(selected.confidence * 100)}%`"></span>
                     </div>
                     <dl class="detail-meta">
                       <dt>source_id</dt><dd class="mono" x-text="selected.source_id"></dd>
@@ -86,7 +224,7 @@
                       <dt>status</dt>
                       <dd>
                         <span x-show="selected.is_current" class="chip chip-current">CURRENT</span>
-                        <span x-show="!selected.is_current" class="chip chip-superseded">superseded</span>
+                        <span x-show="!selected.is_current" class="chip chip-superseded">Corrected by a newer entry</span>
                       </dd>
                     </dl>
                     <blockquote class="mono" x-text="selected.content"></blockquote>
@@ -96,7 +234,10 @@
                   <div class="hint-card">
                     <div class="hint-title">Select a node</div>
                     <p>Click any memory card on the left to see its full content,
-                       provenance, and where it sits in the supersede chain.</p>
+                       provenance, and where it sits in the
+                       <span class="tip" data-tip="When a newer high-precedence memory is written, the older one is marked as 'superseded' (corrected by). The trail stays auditable; nothing is deleted.">
+                         supersede chain<span class="tip-icon">&#9432;</span>
+                       </span>.</p>
                   </div>
                 </template>
               </aside>
@@ -112,9 +253,61 @@
       <!-- ========================== SEARCH VIEW ========================== -->
       <section x-show="tab === 'search'" class="view">
 
+        <!-- One-sentence banner -->
+        <div class="view-banner" x-show="!searchBannerDismissed">
+          <span class="view-banner-icon">&#9432;</span>
+          <span class="view-banner-text">
+            Notice how the same query returns different content depending on who's asking. The
+            permission filter runs in SQL, before ranking &mdash; so forbidden content is never
+            even considered.
+          </span>
+          <button class="view-banner-close" @click="searchBannerDismissed = true" aria-label="Dismiss">&times;</button>
+        </div>
+
+        <!-- Story banner -->
+        <div class="story-banner" x-show="searchStoryActive">
+          <div class="story-banner-head">
+            <span class="story-badge">SCENARIO</span>
+            <span class="story-title">Same query, different answer</span>
+            <button class="view-banner-close" @click="searchStoryActive = false" aria-label="Dismiss">&times;</button>
+          </div>
+          <p class="story-body" x-show="searchStoryStage === 1">
+            We just asked &mdash; as <code class="mono">group:all</code> &mdash; for the secret roadmap.
+            The restricted document is in the index, but the permission pre-filter excluded it
+            in SQL <em>before</em> ranking. The caller can't even count it.
+            <strong>Now ask as <code class="mono">group:exec</code></strong> to see the same query
+            return a different answer.
+          </p>
+          <p class="story-body" x-show="searchStoryStage === 2">
+            Same query, different caller. Now <code class="mono">group:exec</code> is in the principals
+            list, and the restricted chunk is allowed to be ranked. The data layer decides &mdash;
+            not the application, not the model.
+          </p>
+          <div class="story-cta-row" x-show="searchStoryStage === 1">
+            <button class="btn primary" @click="runScenarioBStage2()">Now ask as group:exec &rarr;</button>
+          </div>
+          <div class="story-caption" x-show="searchStoryStage === 2 && searchHits.length > 0">
+            Now they can see the secret roadmap.
+          </div>
+        </div>
+
+        <div class="view-header">
+          <div class="view-title-block">
+            <h2 class="view-title">Search</h2>
+            <p class="view-subtitle">Hybrid retrieval with a permission filter that runs inside the SQL.</p>
+          </div>
+          <button class="help-link" @click="openHelp('search')">? What am I looking at?</button>
+        </div>
+
         <div class="toolbar">
           <div class="field">
-            <label>workspace</label>
+            <label>
+              Team / project
+              <span class="tip" data-tip="A workspace is a tenant boundary. All memory is partitioned by workspace.">
+                <span class="tip-paren">(workspace)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+            </label>
             <select x-model="searchWorkspace">
               <option value="">(pick one)</option>
               <template x-for="w in wsList" :key="w">
@@ -124,7 +317,14 @@
           </div>
 
           <div class="field grow">
-            <label>principals <span class="field-hint">comma-separated</span></label>
+            <label>
+              Who's asking
+              <span class="tip" data-tip="Principals are the identities you're asking on behalf of (users + groups). The SQL pre-filter only ranks chunks whose ACL lists at least one of these.">
+                <span class="tip-paren">(principals)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+              <span class="field-hint">comma-separated</span>
+            </label>
             <input type="text" x-model="searchPrincipals" placeholder="group:all" />
           </div>
 
@@ -144,7 +344,7 @@
           <button class="pill" @click="setExample('group:exec')">
             as <span class="mono">group:exec</span>
           </button>
-          <span class="pills-hint">flip principals to see the ACL pre-filter at work</span>
+          <span class="pills-hint">flip principals to see the permission pre-filter at work</span>
         </div>
 
         <div class="search-box panel">
@@ -163,7 +363,7 @@
               <div class="panel empty-card">
                 <div class="empty-title">(no visible results for these principals)</div>
                 <p class="empty-body">
-                  The ACL pre-filter runs in SQL inside both retrieval arms,
+                  The permission pre-filter runs in SQL inside both retrieval arms,
                   so forbidden chunks are never ranked. Try widening
                   <span class="mono">principals</span> (e.g. add <span class="mono">group:exec</span>).
                 </p>
@@ -175,7 +375,7 @@
                 <div class="results-summary">
                   <span x-text="`${searchHits.length} hit${searchHits.length === 1 ? '' : 's'}`"></span>
                   <span class="results-meta">
-                    principals:
+                    asked as:
                     <template x-for="p in searchPrincipalsList" :key="p">
                       <span class="pill-mini mono" x-text="p"></span>
                     </template>
@@ -188,7 +388,9 @@
                       <span class="hit-id mono" x-text="`#${h.id}`"></span>
                       <div class="arms">
                         <template x-for="a in h.arms" :key="a">
-                          <span class="pill-arm" :class="`arm-${a}`" x-text="a"></span>
+                          <span class="pill-arm" :class="`arm-${a}`"
+                                :title="armTip(a)"
+                                x-text="a"></span>
                         </template>
                       </div>
                       <span class="hit-score mono" x-text="h.score.toFixed(4)"></span>
@@ -223,9 +425,49 @@
       <!-- ========================= PIPELINE VIEW ========================= -->
       <section x-show="tab === 'pipeline'" class="view">
 
+        <!-- One-sentence banner -->
+        <div class="view-banner" x-show="!pipelineBannerDismissed">
+          <span class="view-banner-icon">&#9432;</span>
+          <span class="view-banner-text">
+            This view shows the dedup gate. Re-ingest the same document and watch the system
+            refuse to re-embed &mdash; every chunk is keyed by a hash of its content.
+          </span>
+          <button class="view-banner-close" @click="pipelineBannerDismissed = true" aria-label="Dismiss">&times;</button>
+        </div>
+
+        <!-- Story banner -->
+        <div class="story-banner" x-show="pipelineStoryActive">
+          <div class="story-banner-head">
+            <span class="story-badge">SCENARIO</span>
+            <span class="story-title">Refusing to pay twice</span>
+            <button class="view-banner-close" @click="pipelineStoryActive = false" aria-label="Dismiss">&times;</button>
+          </div>
+          <p class="story-body">
+            We just re-ingested <code class="mono">sample_docs</code> against a workspace that
+            already has it. Scroll to the result card &mdash; the
+            <strong>"Newly embedded (cost incurred)"</strong> counter should be zero, and the
+            <strong>DEDUP GATE FIRED</strong> badge should light up green. Every chunk is keyed
+            by a fingerprint of its content, so identical content can never be re-embedded.
+          </p>
+        </div>
+
+        <div class="view-header">
+          <div class="view-title-block">
+            <h2 class="view-title">Pipeline</h2>
+            <p class="view-subtitle">What's in the index, and what re-ingestion actually costs.</p>
+          </div>
+          <button class="help-link" @click="openHelp('pipeline')">? What am I looking at?</button>
+        </div>
+
         <div class="toolbar">
           <div class="field">
-            <label>workspace</label>
+            <label>
+              Team / project
+              <span class="tip" data-tip="A workspace is a tenant boundary. All memory is partitioned by workspace.">
+                <span class="tip-paren">(workspace)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+            </label>
             <select x-model="pipelineWorkspace" @change="loadStats()">
               <option value="">(pick one)</option>
               <template x-for="w in wsList" :key="w">
@@ -243,23 +485,28 @@
             <div class="metric-grid">
               <div class="metric panel">
                 <div class="metric-num" x-text="stats.raw_events.toLocaleString()"></div>
-                <div class="metric-label">raw events</div>
+                <div class="metric-label">Source items ingested <span class="metric-paren">(raw_events)</span></div>
               </div>
               <div class="metric panel">
                 <div class="metric-num" x-text="stats.chunks_in_workspace.toLocaleString()"></div>
-                <div class="metric-label">chunks</div>
+                <div class="metric-label">Chunks indexed</div>
               </div>
               <div class="metric panel">
                 <div class="metric-num" x-text="stats.unique_content_hashes_in_workspace.toLocaleString()"></div>
-                <div class="metric-label">unique content hashes</div>
+                <div class="metric-label">
+                  Unique content fingerprints
+                  <span class="tip" data-tip="Each chunk is keyed by sha256 of its normalized text. Identical content has identical hash and is embedded only once.">
+                    <span class="tip-icon">&#9432;</span>
+                  </span>
+                </div>
               </div>
               <div class="metric panel">
                 <div class="metric-num" x-text="stats.total_embeddings.toLocaleString()"></div>
-                <div class="metric-label">total embeddings</div>
+                <div class="metric-label">Total embeddings stored</div>
               </div>
               <div class="metric panel">
                 <div class="metric-num" x-text="stats.memory_rows.toLocaleString()"></div>
-                <div class="metric-label">memory rows</div>
+                <div class="metric-label">Distilled memory entries <span class="metric-paren">(memory_rows)</span></div>
               </div>
             </div>
 
@@ -285,7 +532,7 @@
           </div>
         </template>
 
-        <div class="panel actions">
+        <div class="panel actions" id="reingest-panel">
           <div class="card-title">Re-ingest</div>
           <p class="card-sub">
             Re-running an ingest against the same content should compute zero new embeddings &mdash;
@@ -329,17 +576,17 @@
                   <div class="result-num"
                        :class="{ accent: ingestResult.embeddings_computed > 0 }"
                        x-text="ingestResult.embeddings_computed"></div>
-                  <div class="result-label">embeddings computed</div>
+                  <div class="result-label">Newly embedded <span class="metric-paren">(cost incurred)</span></div>
                 </div>
                 <div>
                   <div class="result-num"
                        :class="{ accent: ingestResult.embeddings_computed === 0 }"
                        x-text="ingestResult.embeddings_reused"></div>
-                  <div class="result-label">embeddings reused</div>
+                  <div class="result-label">Reused from cache <span class="metric-paren">(zero cost)</span></div>
                 </div>
               </div>
               <p class="result-note" x-show="ingestResult.embeddings_computed === 0">
-                Identical content hashes already had embeddings &mdash;
+                Identical content fingerprints already had embeddings &mdash;
                 the gate skipped the embedding call entirely.
               </p>
               <p class="result-note" x-show="ingestResult.embeddings_computed > 0">
@@ -359,6 +606,76 @@
       </section>
 
     </main>
+
+    <!-- =========================== HELP MODAL =========================== -->
+    <div class="modal-backdrop" x-show="helpOpen" @click.self="helpOpen = false">
+      <div class="modal-card" x-show="helpOpen">
+        <button class="modal-close" @click="helpOpen = false" aria-label="Close">&times;</button>
+        <template x-if="helpView === 'dag'">
+          <div>
+            <h3 class="modal-title">What am I looking at? &mdash; Memory DAG</h3>
+            <p>
+              This is the audit trail for one memory: a stack of versions about one
+              <em>person or topic</em>, oldest at the top, newest at the bottom.
+            </p>
+            <p>
+              Each node shows who wrote it (<span class="chip chip-human">HUMAN</span>,
+              <span class="chip chip-system">SYSTEM</span>, or
+              <span class="chip chip-agent">AGENT</span>) and how confident they were.
+              Arrows mean <em>"this corrects that"</em> &mdash; nothing is ever deleted,
+              only superseded.
+            </p>
+            <p>
+              The gold-glowing node is the one a reader sees today. Notice that a high-confidence
+              human correction is never overwritten by a lower-confidence agent guess &mdash; the
+              ordering is enforced in the data layer, not in the prompt.
+            </p>
+            <button class="btn ghost" @click="helpOpen = false; showLanding()">&larr; Take me to scenarios</button>
+          </div>
+        </template>
+        <template x-if="helpView === 'search'">
+          <div>
+            <h3 class="modal-title">What am I looking at? &mdash; Search</h3>
+            <p>
+              This is a hybrid retrieval: a vector arm and a full-text arm, fused with
+              <span class="tip" data-tip="Reciprocal Rank Fusion: combine two ranked lists by summing 1/(k+rank) across them. Cheap, stable, no calibration needed.">
+                RRF<span class="tip-icon">&#9432;</span>
+              </span>.
+            </p>
+            <p>
+              The trick is the permissions filter: it runs as a SQL <code>JOIN</code> inside
+              both arms <em>before</em> ranking. So forbidden chunks aren't ranked-then-hidden &mdash;
+              they're never considered. The caller can't even count them.
+            </p>
+            <p>
+              Try the same query as <code class="mono">group:all</code> vs <code class="mono">group:exec</code>
+              and watch the result set change.
+            </p>
+            <button class="btn ghost" @click="helpOpen = false; showLanding()">&larr; Take me to scenarios</button>
+          </div>
+        </template>
+        <template x-if="helpView === 'pipeline'">
+          <div>
+            <h3 class="modal-title">What am I looking at? &mdash; Pipeline</h3>
+            <p>
+              These are the pipeline counters for a workspace, plus a button to re-run an
+              ingest against it.
+            </p>
+            <p>
+              The interesting bit is the cost. Every chunk is content-addressed &mdash; its key
+              is a sha256 of its normalized text. So re-ingesting the same document is
+              free: the embedder is never called for chunks whose hash already exists.
+            </p>
+            <p>
+              Click "Re-ingest <code class="mono">sample_docs</code>" and watch the
+              <strong>Newly embedded</strong> counter stay at zero.
+            </p>
+            <button class="btn ghost" @click="helpOpen = false; showLanding()">&larr; Take me to scenarios</button>
+          </div>
+        </template>
+      </div>
+    </div>
+
   </div>
 </body>
 </html>
