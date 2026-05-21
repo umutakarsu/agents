@@ -128,9 +128,16 @@ a node for full content, provenance, confidence, and status.
 
 ```bash
 pip install -e ".[memscope]"
-uvicorn memscope.app:app --reload
+uvicorn memscope.app:app --host 127.0.0.1 --reload
 # open http://localhost:8000
 ```
+
+> **No auth — bind to localhost only.** memscope's HTTP layer does not
+> authenticate callers and trusts whatever `principals` they pass. The
+> retrieval-side ACL pre-filter is still applied in SQL, but anyone with
+> network reach to the listening port can claim `group:exec` and read
+> restricted content. Always pass `--host 127.0.0.1` (or run behind a
+> trusted reverse proxy that adds auth) until a real identity layer ships.
 
 Read-only -- it inspects whatever's already in your Postgres. Pipeline,
 Search, and Ingest views from the design are not built yet.

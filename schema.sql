@@ -53,15 +53,21 @@ CREATE TABLE IF NOT EXISTS chunk_acl (
 
 -- Layer for write-back. Append-only, versioned, provenance-carrying.
 -- Not exercised in the foundation phase, defined here so the schema is whole.
+-- source_type is constrained to the precedence enum at the schema level so
+-- an agent caller can't claim source_type='human' and outrank a real human
+-- via the conflict-resolution ladder. confidence is bounded to [0, 1] to
+-- prevent inf/NaN from short-circuiting precedence comparisons.
 CREATE TABLE IF NOT EXISTS memory (
     id            BIGSERIAL   PRIMARY KEY,
     workspace     TEXT        NOT NULL,
     entity_key    TEXT        NOT NULL,           -- what this memory is about
     content       TEXT        NOT NULL,
-    source_type   TEXT        NOT NULL,           -- 'agent' | 'human' | 'system'
+    source_type   TEXT        NOT NULL
+                  CHECK (source_type IN ('human', 'system', 'agent')),
     source_id     TEXT        NOT NULL,
     derived_from  BIGINT[]    NOT NULL DEFAULT '{}',  -- raw_event ids
-    confidence    REAL        NOT NULL DEFAULT 0.5,
+    confidence    REAL        NOT NULL DEFAULT 0.5
+                  CHECK (confidence BETWEEN 0.0 AND 1.0),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     superseded_by BIGINT      REFERENCES memory(id)
 );
