@@ -113,33 +113,55 @@ def remember(
     return new_id, winner_id == new_id
 
 
-def recall(workspace: str, entity_key: str) -> MemoryRow | None:
-    """The single current memory for an entity, or None."""
+def recall(
+    workspace: str,
+    entity_key: str,
+    principals: list[str] | None = None,
+) -> MemoryRow | None:
+    """The single current memory for an entity, or None.
+
+    If `principals` is given, the same `allowed_principals && %s::text[]`
+    pre-filter retrieval uses is applied here so callers can't recall a row
+    they would not be allowed to surface via search. If `principals` is None,
+    no ACL filter is applied (backward-compatible default for trusted callers
+    like the demo and CLI scripts)."""
+    sql = """
+        SELECT id, content, source_type, source_id, confidence, derived_from
+        FROM memory
+        WHERE workspace = %s AND entity_key = %s AND superseded_by IS NULL
+    """
+    params: tuple = (workspace, entity_key)
+    if principals is not None:
+        sql += " AND allowed_principals && %s::text[]"
+        params = params + (principals,)
     with connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, content, source_type, source_id, confidence, derived_from
-            FROM memory
-            WHERE workspace = %s AND entity_key = %s AND superseded_by IS NULL
-            """,
-            (workspace, entity_key),
-        )
+        cur.execute(sql, params)
         row = cur.fetchone()
     return MemoryRow(*row) if row else None
 
 
-def history(workspace: str, entity_key: str) -> list[tuple]:
+def history(
+    workspace: str,
+    entity_key: str,
+    principals: list[str] | None = None,
+) -> list[tuple]:
     """Full audit trail for an entity, oldest first: every memory ever
-    written and what superseded it."""
+    written and what superseded it.
+
+    If `principals` is given, only rows whose `allowed_principals` overlap
+    are returned -- same ACL pre-filter as retrieval. If None, returns all
+    rows (backward-compatible)."""
+    sql = """
+        SELECT id, content, source_type, source_id, confidence,
+               superseded_by, created_at
+        FROM memory
+        WHERE workspace = %s AND entity_key = %s
+    """
+    params: tuple = (workspace, entity_key)
+    if principals is not None:
+        sql += " AND allowed_principals && %s::text[]"
+        params = params + (principals,)
+    sql += " ORDER BY id"
     with connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, content, source_type, source_id, confidence,
-                   superseded_by, created_at
-            FROM memory
-            WHERE workspace = %s AND entity_key = %s
-            ORDER BY id
-            """,
-            (workspace, entity_key),
-        )
+        cur.execute(sql, params)
         return cur.fetchall()

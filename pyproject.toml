@@ -19,6 +19,13 @@ memscope = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
 ]
+# mcp_server: expose memlayer as an MCP server so Claude Code, Cursor, etc.
+# can read and write to memory through the five MCP tools.
+mcp_server = [
+    "mcp>=1.2",
+    "uvicorn[standard]>=0.27",
+    "starlette>=0.36",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

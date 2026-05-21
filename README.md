@@ -118,6 +118,36 @@ python scripts/ingest_mcp.py https://my-mcp.example/mcp \
     --workspace acme --header "Authorization: Bearer $MY_TOKEN"
 ```
 
+### Expose memlayer as an MCP server
+
+Let MCP-speaking clients (Claude Code, Cursor, OpenCode) read and write to your
+memlayer through five tools: `search_memory`, `remember`, `recall`, `history`,
+`ingest_text`.
+
+```bash
+pip install -e ".[mcp_server]"
+python scripts/serve_mcp.py                  # stdio (for Claude Code)
+python scripts/serve_mcp.py --http 3111      # HTTP transport
+```
+
+Claude Code config snippet:
+
+```json
+{
+  "mcpServers": {
+    "memlayer": {
+      "command": "python",
+      "args": ["scripts/serve_mcp.py"],
+      "cwd": "/path/to/agents"
+    }
+  }
+}
+```
+
+Permissions: the MCP server currently trusts the caller's principals as
+supplied. Production deployments need an auth layer (see note in
+`memscope/app.py`).
+
 ## memscope -- visual inspector
 
 A small FastAPI + Alpine.js UI for *seeing* what the memory layer does.
