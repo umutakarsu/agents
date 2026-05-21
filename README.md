@@ -194,6 +194,20 @@ Cleanup is more expensive than prevention — wiping a secret from `chunks`
 after the fact would also force re-embedding. Scrubbing at the ingest
 boundary side-steps that whole class of cleanup.
 
+## Phase 6: tiered memory + Ebbinghaus decay
+
+Memory rows now carry a `tier` (`working` / `episodic` / `semantic` / `procedural`)
+and an effective confidence that decays over time unless the row is reinforced
+by being read. Stale rows in low tiers auto-evict:
+
+```bash
+python scripts/evict_stale.py            # delete stale rows
+python scripts/evict_stale.py --dry-run  # report only
+```
+
+Half-lives: working=6h, episodic=14d, semantic=180d, procedural=365d.
+Promotion between tiers is future work.
+
 ## Next phases
 
 - **5 (remaining)** — memscope Pipeline + Search + Ingest views;

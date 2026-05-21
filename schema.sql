@@ -103,3 +103,24 @@ CREATE TABLE IF NOT EXISTS redactions_log (
     occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS redactions_log_workspace_idx ON redactions_log (workspace, occurred_at DESC);
+
+-- Phase 6: tiered memory + Ebbinghaus decay
+-- A row's tier sets its half-life and floor; last_referenced_at is the
+-- reinforcement clock (every recall/search read bumps it to now()).
+-- Effective confidence (confidence * 0.5^(age/half_life), floored per tier)
+-- is computed at read time, never stored. Auto-promotion between tiers is
+-- future work; today remember() takes an explicit tier (default 'semantic'
+-- so existing demo data keeps its meaning).
+ALTER TABLE memory
+    ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'semantic';
+DO $$ BEGIN
+    ALTER TABLE memory ADD CONSTRAINT memory_tier_check
+        CHECK (tier IN ('working','episodic','semantic','procedural'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+ALTER TABLE memory
+    ADD COLUMN IF NOT EXISTS last_referenced_at TIMESTAMPTZ NOT NULL DEFAULT now();
+-- Eviction sweeps filter on (tier, last_referenced_at); composite keeps the
+-- low-tier scans cheap as the table grows.
+CREATE INDEX IF NOT EXISTS idx_memory_tier_refd
+    ON memory (tier, last_referenced_at);

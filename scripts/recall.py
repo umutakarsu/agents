@@ -21,9 +21,9 @@ def main() -> None:
         if not rows:
             print("(no memory for this entity)")
             return
-        for mid, content, stype, sid, conf, superseded, _ in rows:
+        for mid, content, stype, sid, conf, superseded, _, tier, _lref, eff in rows:
             tag = f"-> superseded by #{superseded}" if superseded else "CURRENT"
-            print(f"#{mid:<3} {stype}:{sid:<14} c={conf:<4} {tag}")
+            print(f"#{mid:<3} {stype}:{sid:<14} c={conf:<4} eff={eff:.3f} tier={tier:<10} {tag}")
             print(f"     {content}")
         return
 
