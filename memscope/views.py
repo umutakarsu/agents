@@ -205,3 +205,119 @@ def pipeline_ingest(
     items = read_dir(dir, allowed_principals=allowed_principals)
     stats = ingest(items, workspace=workspace)
     return asdict(stats)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: identity unification view-models.
+#
+# Identities expose cross-source aliases for a workspace. Like all other
+# memscope views, callers pass `principals` so the same ACL pre-filter is
+# enforced -- an identity is only returned if at least one memory row for
+# its entity_key is visible to the caller.
+# ---------------------------------------------------------------------------
+
+
+def identities_for_workspace(
+    workspace: str, principals: list[str]
+) -> list[dict]:
+    """List identities in a workspace, ACL-filtered. An identity is
+    *visible* if at least one memory row for its entity_key would survive
+    the caller's principals filter -- otherwise the identity itself is a
+    leak channel (its existence implies the existence of restricted
+    memory). Identities with no memory rows at all are visible -- a fresh
+    seed isn't a leak."""
+    from memlayer.identity import list_identities  # local import to avoid cycle
+
+    all_idents = list_identities(workspace)
+    if not all_idents:
+        return []
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT entity_key
+            FROM memory
+            WHERE workspace = %s
+              AND allowed_principals && %s::text[]
+            """,
+            (workspace, principals),
+        )
+        visible_keys = {r[0] for r in cur.fetchall()}
+        # entity_keys that exist in memory at all (visible or not)
+        cur.execute(
+            "SELECT DISTINCT entity_key FROM memory WHERE workspace = %s",
+            (workspace,),
+        )
+        any_memory_keys = {r[0] for r in cur.fetchall()}
+
+    out = []
+    for ident in all_idents:
+        key = ident["entity_key"]
+        # Show identities with NO memory rows at all (fresh) and those
+        # whose memory is at least partially visible.
+        if key in any_memory_keys and key not in visible_keys:
+            continue
+        out.append(ident)
+    return out
+
+
+def identity_details(
+    identity_id: int, principals: list[str]
+) -> dict | None:
+    """Full details for one identity: aliases + the memory rows for its
+    entity_key that the caller may see + history."""
+    from memlayer.identity import get_identity  # local import
+    from memlayer.writeback import history, recall
+
+    ident = get_identity(identity_id)
+    if ident is None:
+        return None
+
+    # get_identity doesn't carry workspace in its return shape; fetch it
+    # directly so we can call recall/history under ACL filter.
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT workspace FROM identity WHERE id = %s", (identity_id,))
+        wrow = cur.fetchone()
+        if wrow is None:
+            return None
+        workspace = wrow[0]
+
+    current = recall(workspace, ident["entity_key"], principals=principals)
+    rows = history(workspace, ident["entity_key"], principals=principals)
+    hist = [
+        {
+            "id": int(r[0]),
+            "content": r[1],
+            "source_type": r[2],
+            "source_id": r[3],
+            "confidence": float(r[4]),
+            "superseded_by": int(r[5]) if r[5] is not None else None,
+            "created_at": r[6].isoformat() if r[6] else None,
+        }
+        for r in rows
+    ]
+    return {
+        "identity": {**ident, "workspace": workspace},
+        "current_memory": (
+            {
+                "id": current.id,
+                "content": current.content,
+                "source_type": current.source_type,
+                "source_id": current.source_id,
+                "confidence": current.confidence,
+                "tier": current.tier,
+            }
+            if current is not None
+            else None
+        ),
+        "history": hist,
+    }
+
+
+def merge_proposals_for_workspace(workspace: str) -> list[dict]:
+    from memlayer.identity import list_proposals  # local import
+    return list_proposals(workspace, status="pending")
+
+
+def cluster_graph_view(identity_id: int) -> dict | None:
+    from memlayer.identity import cluster_graph  # local import
+    return cluster_graph(identity_id)

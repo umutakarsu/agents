@@ -151,3 +151,80 @@ CREATE TABLE IF NOT EXISTS users (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS users_token_hash_idx ON users (token_hash);
+
+-- Phase 7b: identity unification (cross-source person/team/topic resolution)
+
+-- A canonical identity in a workspace. Each one represents ONE real-world
+-- thing (a person, a team, a topic). Memory rows link to it by entity_key.
+CREATE TABLE IF NOT EXISTS identity (
+    id BIGSERIAL PRIMARY KEY,
+    workspace TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,                -- 'Ali Karsu', 'Platform Team'
+    kind TEXT NOT NULL CHECK (kind IN ('person','team','project','topic')),
+    entity_key TEXT NOT NULL,                    -- mirrors memory.entity_key
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (workspace, entity_key)
+);
+CREATE INDEX IF NOT EXISTS identity_workspace_idx ON identity (workspace);
+
+-- Per-source aliases. The same identity might have an entry per source.
+CREATE TABLE IF NOT EXISTS identity_alias (
+    id BIGSERIAL PRIMARY KEY,
+    identity_id BIGINT NOT NULL REFERENCES identity(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,                        -- 'slack','gmail','github','notion'
+    external_id TEXT NOT NULL,                   -- '@ali','ali@acme.com','ali-acme'
+    display_name TEXT,                           -- 'Ali Karsu','ali_acme'
+    confidence REAL NOT NULL DEFAULT 1.0
+        CHECK (confidence BETWEEN 0.0 AND 1.0),
+    evidence_count INT NOT NULL DEFAULT 1,       -- how many times we saw this alias
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source, external_id)                 -- one alias maps to one identity, globally
+);
+CREATE INDEX IF NOT EXISTS identity_alias_identity_idx ON identity_alias (identity_id);
+
+-- Merges the system thinks should happen but isn't confident enough to do
+-- autonomously. Surface in the UI for human approval.
+CREATE TABLE IF NOT EXISTS merge_proposal (
+    id BIGSERIAL PRIMARY KEY,
+    workspace TEXT NOT NULL,
+    identity_a BIGINT NOT NULL REFERENCES identity(id) ON DELETE CASCADE,
+    identity_b BIGINT NOT NULL REFERENCES identity(id) ON DELETE CASCADE,
+    confidence REAL NOT NULL,
+    signals JSONB NOT NULL,                      -- {"exact_email":true,"name_match":0.92,...}
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','approved','rejected')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at TIMESTAMPTZ,
+    resolved_by TEXT,                            -- who clicked approve/reject
+    CHECK (identity_a < identity_b)              -- canonical pair ordering
+);
+CREATE INDEX IF NOT EXISTS merge_proposal_pending_idx
+    ON merge_proposal (workspace, status) WHERE status = 'pending';
+
+-- Denylist: pairs that were rejected, don't propose again. Adversarial defense:
+-- if a malicious source tries the same bait twice, we remember.
+CREATE TABLE IF NOT EXISTS merge_denylist (
+    workspace TEXT NOT NULL,
+    identity_a BIGINT NOT NULL REFERENCES identity(id) ON DELETE CASCADE,
+    identity_b BIGINT NOT NULL REFERENCES identity(id) ON DELETE CASCADE,
+    reason TEXT,
+    until TIMESTAMPTZ,                           -- NULL = permanent
+    PRIMARY KEY (workspace, identity_a, identity_b),
+    CHECK (identity_a < identity_b)
+);
+
+-- Audit log: every merge is reversible. We store the BEFORE state so a
+-- rejected-after-the-fact merge can be undone.
+CREATE TABLE IF NOT EXISTS identity_merge_log (
+    id BIGSERIAL PRIMARY KEY,
+    workspace TEXT NOT NULL,
+    winner_id BIGINT NOT NULL REFERENCES identity(id),
+    loser_id BIGINT NOT NULL,                    -- soft FK (loser may be deleted)
+    loser_canonical_name TEXT NOT NULL,
+    loser_entity_key TEXT NOT NULL,
+    aliases_moved JSONB NOT NULL,                -- snapshot of identity_alias rows that moved
+    signals JSONB NOT NULL,
+    merged_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    merged_by TEXT,                              -- 'auto', or user identifier
+    reversed_at TIMESTAMPTZ
+);

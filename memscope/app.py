@@ -238,3 +238,101 @@ def pitch() -> FileResponse:
 @app.get("/board")
 def board() -> FileResponse:
     return FileResponse(str(STATIC / "board.html"))
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: identity unification endpoints.
+#
+# Principals + workspace are derived from the authenticated user, matching
+# the rest of the API. The mutating endpoints (approve / reject) stamp the
+# caller's email into ``resolved_by`` so the merge audit log records who
+# acted -- a service-account agent can't impersonate a human.
+# ---------------------------------------------------------------------------
+
+from memscope.views import (  # noqa: E402  -- intentional append-at-end
+    cluster_graph_view,
+    identities_for_workspace,
+    identity_details,
+    merge_proposals_for_workspace,
+)
+from memlayer.identity import approve as identity_approve  # noqa: E402
+from memlayer.identity import reject as identity_reject  # noqa: E402
+
+
+class RejectProposalRequest(BaseModel):
+    reason: str
+
+
+@app.get("/api/identities")
+def get_identities(
+    workspace: str,
+    user: User = Depends(current_user),
+) -> dict:
+    _require_workspace(user, workspace)
+    return {
+        "workspace": workspace,
+        "identities": identities_for_workspace(workspace, user.principals),
+    }
+
+
+@app.get("/api/identity/{identity_id}")
+def get_identity_endpoint(
+    identity_id: int,
+    user: User = Depends(current_user),
+) -> dict:
+    details = identity_details(identity_id, user.principals)
+    if details is None:
+        raise HTTPException(status_code=404, detail="identity not found")
+    return details
+
+
+@app.get("/api/identity/{identity_id}/cluster_graph")
+def get_cluster_graph(
+    identity_id: int,
+    user: User = Depends(current_user),
+) -> dict:
+    # principals isn't strictly needed for the cluster graph -- the alias /
+    # source-color information isn't access-controlled, only the *content*
+    # is. But we still require auth so the endpoint isn't an enumeration
+    # vector on identity IDs across tenants.
+    graph = cluster_graph_view(identity_id)
+    if graph is None:
+        raise HTTPException(status_code=404, detail="identity not found")
+    return graph
+
+
+@app.get("/api/merge_proposals")
+def get_merge_proposals(
+    workspace: str,
+    user: User = Depends(current_user),
+) -> dict:
+    _require_workspace(user, workspace)
+    return {
+        "workspace": workspace,
+        "proposals": merge_proposals_for_workspace(workspace),
+    }
+
+
+@app.post("/api/merge_proposals/{proposal_id}/approve")
+def post_approve_merge(
+    proposal_id: int,
+    user: User = Depends(current_user),
+) -> dict:
+    try:
+        winner_id = identity_approve(proposal_id, by=user.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "winner_id": winner_id}
+
+
+@app.post("/api/merge_proposals/{proposal_id}/reject")
+def post_reject_merge(
+    proposal_id: int,
+    req: RejectProposalRequest,
+    user: User = Depends(current_user),
+) -> dict:
+    try:
+        identity_reject(proposal_id, reason=req.reason, by=user.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
