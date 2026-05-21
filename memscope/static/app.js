@@ -6,11 +6,53 @@
    call back through a window-level reference (memscope_app) because Alpine
    event bindings inside x-html'd content do not reach the component scope. */
 
+// Bearer token storage key. We keep this out of the component state on
+// purpose: localStorage is the source of truth so a page reload or another
+// tab on the same origin picks up the token without re-prompting. The token
+// is only ever sent in the Authorization header -- never logged, never put
+// in a URL, never echoed back into the DOM.
+const TOKEN_KEY = 'memscopeToken';
+
+function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY) || ''; }
+  catch (_) { return ''; }
+}
+
+function setToken(t) {
+  try {
+    if (t) localStorage.setItem(TOKEN_KEY, t);
+    else   localStorage.removeItem(TOKEN_KEY);
+  } catch (_) { /* private mode etc. */ }
+}
+
+// authFetch: thin wrapper around fetch() that adds the bearer header when a
+// token is present. Used for EVERY API call so we never accidentally hit an
+// endpoint anonymously when the user is signed in. If no token is stored,
+// the request goes unauthenticated -- the server's anonymous-mode toggle
+// decides whether that 401s or falls back to group:all.
+function authFetch(url, options) {
+  const opts = options ? { ...options } : {};
+  const headers = new Headers(opts.headers || {});
+  const tok = getToken();
+  if (tok) headers.set('Authorization', `Bearer ${tok}`);
+  opts.headers = headers;
+  return fetch(url, opts);
+}
+
 function memscope() {
   return {
     // ---------- shared ----------
     tab: 'dag',
     wsList: [],
+
+    // ---------- auth state ----------
+    // currentUser is populated by /api/whoami on init(). null while loading.
+    // For anonymous mode it carries the synthetic user; for signed-in users
+    // it carries email + principals so the topbar can show the chip.
+    currentUser: null,
+    signinOpen: false,
+    signinTokenInput: '',
+    signinError: '',
 
     // ---------- view routing ----------
     // The app has three top-level views:
@@ -74,17 +116,82 @@ function memscope() {
     ingestResult: null,
 
     // =====================================================
-    // init: pull workspace list once, share across all views
+    // init: identify the caller, then pull the workspace list.
     // =====================================================
     async init() {
       window.memscope_app = this;  // expose for SVG onclick callbacks
+      // /api/whoami doubles as a 401 probe: if the user has no token AND
+      // the server has auth enabled, we surface the sign-in chip prominently
+      // by leaving currentUser=null. Once a token is pasted, init() is
+      // re-run to pick up the new identity.
+      await this.refreshWhoami();
+      await this.refreshWorkspaces();
+    },
+
+    async refreshWhoami() {
       try {
-        const r = await fetch('/api/workspaces').then(this._json);
+        const r = await authFetch('/api/whoami').then(this._json);
+        this.currentUser = r;
+      } catch (e) {
+        this.currentUser = null;
+      }
+    },
+
+    async refreshWorkspaces() {
+      try {
+        const r = await authFetch('/api/workspaces').then(this._json);
         this.wsList = r.workspaces || [];
       } catch (e) {
         // Render in the dag-view banner (the user is most likely there on load).
         this.dagError = `loading workspaces: ${e.message}`;
       }
+    },
+
+    // =====================================================
+    // Sign in / sign out -- minimal "paste a token" affordance.
+    // =====================================================
+    openSignin() {
+      this.signinTokenInput = '';
+      this.signinError = '';
+      this.signinOpen = true;
+    },
+    closeSignin() {
+      this.signinOpen = false;
+      this.signinError = '';
+      this.signinTokenInput = '';
+    },
+    async submitSignin() {
+      const tok = (this.signinTokenInput || '').trim();
+      if (!tok) {
+        this.signinError = 'paste a bearer token';
+        return;
+      }
+      setToken(tok);
+      // Probe /api/whoami with the new token. If the server rejects it we
+      // clear the token again so the user isn't stuck with a bad credential.
+      try {
+        const r = await authFetch('/api/whoami').then(this._json);
+        this.currentUser = r;
+        this.signinOpen = false;
+        this.signinTokenInput = '';
+        this.signinError = '';
+        await this.refreshWorkspaces();
+      } catch (e) {
+        setToken('');
+        this.currentUser = null;
+        this.signinError = `sign-in failed: ${e.message}`;
+      }
+    },
+    async signOut() {
+      setToken('');
+      this.currentUser = null;
+      this.wsList = [];
+      // Re-probe so anonymous mode (if enabled) reflects in the chip.
+      await this.refreshWhoami();
+      await this.refreshWorkspaces();
+    },
+    get signedIn() {
+      return !!(this.currentUser && !this.currentUser.anonymous);
     },
 
     // =====================================================
@@ -211,9 +318,11 @@ function memscope() {
       this.dagError = '';
       if (!this.workspace) return;
       try {
-        const r = await fetch(
+        // Principals come from the authenticated user now -- we don't pass
+        // them in the URL. The "Who's asking" field is left in the UI as a
+        // read-only hint about what the server will use (currentUser.principals).
+        const r = await authFetch(
           `/api/entities?workspace=${encodeURIComponent(this.workspace)}`
-          + `&principals=${encodeURIComponent(this.dagPrincipalsCsv)}`
         ).then(this._json);
         this.entityList = r.entities || [];
       } catch (e) {
@@ -226,9 +335,8 @@ function memscope() {
       this.dagError = '';
       if (!this.workspace || !this.entityKey) return;
       try {
-        const r = await fetch(
+        const r = await authFetch(
           `/api/memory/${encodeURIComponent(this.workspace)}/${encodeURIComponent(this.entityKey)}`
-          + `?principals=${encodeURIComponent(this.dagPrincipalsCsv)}`
         ).then(this._json);
         this.dag = r;
       } catch (e) {
@@ -266,13 +374,15 @@ function memscope() {
       this.searchLoading = true;
       this.searchRan = true;
       this.searchHits = [];
-      const principalsCsv = this.searchPrincipalsList.join(',');
+      // Principals come from the authenticated user. The on-screen "Who's
+      // asking" field stays editable because the demo scenarios mutate it
+      // to tell the audit story -- but it is no longer passed to the
+      // server, which trusts only what the bearer token says about us.
       const url = `/api/search?workspace=${encodeURIComponent(this.searchWorkspace)}`
         + `&q=${encodeURIComponent(this.searchQuery)}`
-        + `&principals=${encodeURIComponent(principalsCsv)}`
         + `&k=${encodeURIComponent(this.searchK)}`;
       try {
-        const r = await fetch(url).then(this._json);
+        const r = await authFetch(url).then(this._json);
         this.searchHits = r.hits || [];
       } catch (e) {
         this.searchError = `search failed: ${e.message} (API may not be available yet)`;
@@ -295,9 +405,8 @@ function memscope() {
       this.stats = null;
       if (!this.pipelineWorkspace) return;
       try {
-        const r = await fetch(
+        const r = await authFetch(
           `/api/pipeline/stats?workspace=${encodeURIComponent(this.pipelineWorkspace)}`
-          + `&principals=${encodeURIComponent(this.pipelinePrincipalsCsv)}`
         ).then(this._json);
         this.stats = r;
       } catch (e) {
@@ -311,7 +420,7 @@ function memscope() {
       this.ingestLoading = true;
       this.ingestResult = null;
       try {
-        const r = await fetch('/api/pipeline/ingest', {
+        const r = await authFetch('/api/pipeline/ingest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

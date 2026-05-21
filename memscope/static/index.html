@@ -28,8 +28,46 @@
         <button class="btn scenario-btn" @click="showLanding()">
           <span class="scenario-icon">&#9733;</span> Try a scenario
         </button>
+        <!-- Auth chip. Three states: signed in (email + sign-out), anonymous
+             (dev/demo, with hint that auth is disabled), no token (sign in). -->
+        <div class="auth-chip" x-show="signedIn">
+          <span class="auth-dot auth-dot-on" aria-hidden="true"></span>
+          <span class="auth-email mono" x-text="currentUser && currentUser.email"></span>
+          <button class="auth-btn" @click="signOut()" title="Clear stored token">sign out</button>
+        </div>
+        <div class="auth-chip auth-chip-anon" x-show="currentUser && currentUser.anonymous">
+          <span class="auth-dot auth-dot-anon" aria-hidden="true"></span>
+          <span class="auth-anon-label">anonymous</span>
+          <button class="auth-btn" @click="openSignin()" title="Paste a bearer token">sign in</button>
+        </div>
+        <div class="auth-chip auth-chip-off" x-show="!currentUser">
+          <span class="auth-dot auth-dot-off" aria-hidden="true"></span>
+          <button class="auth-btn" @click="openSignin()">sign in</button>
+        </div>
       </div>
     </header>
+
+    <!-- =========================== SIGN-IN MODAL =========================== -->
+    <div class="modal-backdrop" x-show="signinOpen" @click.self="closeSignin()">
+      <div class="modal-card" x-show="signinOpen">
+        <button class="modal-close" @click="closeSignin()" aria-label="Close">&times;</button>
+        <h3 class="modal-title">Sign in</h3>
+        <p>
+          Paste a bearer token. Tokens are minted by
+          <code class="mono">scripts/create_user.py</code> -- they're shown
+          exactly once, so keep yours somewhere safe.
+        </p>
+        <input type="password" class="signin-token-input mono"
+               x-model="signinTokenInput"
+               @keydown.enter="submitSignin()"
+               placeholder="paste token here" />
+        <div x-show="signinError" class="error" x-text="signinError" style="margin-top:10px"></div>
+        <div class="signin-actions">
+          <button class="btn primary" @click="submitSignin()">sign in</button>
+          <button class="btn ghost" @click="closeSignin()">cancel</button>
+        </div>
+      </div>
+    </div>
 
     <!-- =========================== HOME / PRODUCT LANDING =========================== -->
     <main class="content home" x-show="view === 'home'">

@@ -124,3 +124,30 @@ ALTER TABLE memory
 -- low-tier scans cheap as the table grows.
 CREATE INDEX IF NOT EXISTS idx_memory_tier_refd
     ON memory (tier, last_referenced_at);
+
+-- Phase 7: HTTP-side identity layer.
+-- Closes the audit P0: memscope's HTTP API previously trusted whatever
+-- `principals` the caller passed in the query string -- anyone with network
+-- reach could claim group:exec and read restricted content. We now require a
+-- bearer token; the user record stores the ONLY principals the caller is
+-- authorized to claim, plus the ONLY workspaces they can touch. The retrieval
+-- ACL pre-filter is unchanged -- this table is what feeds it trustworthy
+-- values.
+--
+-- Tokens are stored as sha256 hashes (never plaintext). The bootstrap CLI
+-- prints the plaintext exactly once and forgets it; rotation = create a new
+-- user (or replace token_hash via a manual UPDATE).
+CREATE TABLE IF NOT EXISTS users (
+    id           BIGSERIAL   PRIMARY KEY,
+    email        TEXT        NOT NULL UNIQUE,
+    token_hash   TEXT        NOT NULL,
+    principals   TEXT[]      NOT NULL,
+    workspaces   TEXT[]      NOT NULL,
+    -- Closes audit P1: when a remember() call enters via HTTP, the wrapper
+    -- substitutes user.source_type so an agent service-account can't claim
+    -- source_type='human' and outrank a real human via the supersede ladder.
+    source_type  TEXT        NOT NULL DEFAULT 'human'
+                  CHECK (source_type IN ('human','system','agent')),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS users_token_hash_idx ON users (token_hash);
