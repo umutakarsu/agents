@@ -9,11 +9,13 @@ conflict-resolved write-back, and memory-aware retrieval.
 """
 
 import sys
+from datetime import datetime, timezone
 
 from memlayer.connectors.local_files import read_dir
 from memlayer.db import connect
-from memlayer.ingest import ingest
+from memlayer.ingest import SourceItem, ingest
 from memlayer.retrieval import search
+from memlayer.scrub import scrub
 from memlayer.writeback import recall, remember
 
 WS = "e2e"
@@ -30,7 +32,7 @@ def reset() -> None:
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             "TRUNCATE memory, chunk_acl, embeddings, event_chunks, "
-            "chunks, raw_events RESTART IDENTITY CASCADE"
+            "chunks, raw_events, redactions_log RESTART IDENTITY CASCADE"
         )
         conn.commit()
 
@@ -116,6 +118,89 @@ def main() -> None:
           bool(mem_hits) and all(h.provenance for h in mem_hits))
     check("memory hits carry confidence",
           bool(mem_hits) and all(h.confidence is not None for h in mem_hits))
+
+    print("Phase 6: privacy filter at ingest boundary")
+    # Pure scrub() unit checks: no-secret text passes through unchanged.
+    clean = "Just a normal sentence with nothing sensitive."
+    clean_out, clean_reds = scrub(clean)
+    check("scrub() leaves clean text identical", clean_out == clean)
+    check("scrub() returns no redactions for clean text", clean_reds == [])
+
+    # PII is OFF by default -- emails survive (legitimate signal).
+    pii_text = "Contact me at alice@example.com about the project."
+    default_out, default_reds = scrub(pii_text)
+    check(
+        "scrub() default leaves email in place (PII off by default)",
+        "alice@example.com" in default_out and default_reds == [],
+    )
+    opt_out, opt_reds = scrub(pii_text, scrub_pii=True)
+    check(
+        "scrub(scrub_pii=True) opts into email scrubbing",
+        "alice@example.com" not in opt_out
+        and any(r.kind == "email" for r in opt_reds),
+    )
+
+    # End-to-end: a SourceItem with an AWS key + GitHub token is scrubbed
+    # before it ever lands in chunks/embeddings/FTS.
+    aws_key = "AKIAIOSFODNN7EXAMPLE"
+    gh_token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+    leaky = SourceItem(
+        source="slack",
+        source_id="thread-leak-1",
+        text=(
+            f"# Outage post-mortem\n\nWe accidentally committed an AWS key: "
+            f"{aws_key}. Also rotated the GitHub token {gh_token}.\n"
+        ),
+        occurred_at=datetime.now(timezone.utc),
+    )
+    leak_stats = ingest([leaky], workspace=WS)
+    check("ingest reports scrubbed chars > 0", leak_stats.scrubbed_chars > 0)
+
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM chunks WHERE text LIKE %s LIMIT 1", (f"%{aws_key}%",)
+        )
+        aws_in_chunks = cur.fetchone() is not None
+        cur.execute(
+            "SELECT 1 FROM chunks WHERE text LIKE %s LIMIT 1", (f"%{gh_token}%",)
+        )
+        gh_in_chunks = cur.fetchone() is not None
+        cur.execute(
+            "SELECT kind, count FROM redactions_log "
+            "WHERE workspace = %s AND source_id = %s",
+            (WS, "thread-leak-1"),
+        )
+        logged = {row[0]: row[1] for row in cur.fetchall()}
+
+    check("AWS key never reaches chunks table", not aws_in_chunks)
+    check("GitHub token never reaches chunks table", not gh_in_chunks)
+    check("redactions_log records aws_access_key", "aws_access_key" in logged)
+    check("redactions_log records github_token", "github_token" in logged)
+
+    # Search for the secret returns nothing (it was never embedded).
+    secret_hits = search(aws_key, WS, ["group:all"], k=10)
+    check(
+        "search for the AWS key returns no hits referencing the key",
+        not any(aws_key in h.text for h in secret_hits),
+    )
+
+    # A clean SourceItem is identical pre- and post-scrub: no log rows.
+    benign = SourceItem(
+        source="slack",
+        source_id="thread-benign-1",
+        text="# Sprint plan\n\nGroom the backlog, ship the redactions filter.\n",
+        occurred_at=datetime.now(timezone.utc),
+    )
+    benign_stats = ingest([benign], workspace=WS)
+    check("benign ingest has zero scrubbed_chars", benign_stats.scrubbed_chars == 0)
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM redactions_log "
+            "WHERE workspace = %s AND source_id = %s",
+            (WS, "thread-benign-1"),
+        )
+        benign_log_rows = cur.fetchone()[0]
+    check("benign ingest writes no redaction log rows", benign_log_rows == 0)
 
     print()
     if _FAILS:

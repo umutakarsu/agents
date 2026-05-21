@@ -172,6 +172,28 @@ uvicorn memscope.app:app --host 127.0.0.1 --reload
 Read-only -- it inspects whatever's already in your Postgres. Pipeline,
 Search, and Ingest views from the design are not built yet.
 
+## Privacy filter
+
+Secrets and (optionally) PII are scrubbed at ingest, before chunking and
+embedding. The system can never surface in search what it never stored.
+
+Detected by default: AWS keys, OpenAI / Anthropic / Stripe / GitHub tokens,
+JWTs, private-key blocks.
+
+Opt-in (often legitimate signal otherwise): emails, SSNs, credit-card
+numbers — pass `scrub_pii=True` to `scrub()` (or to `ingest()`) if you
+want them stripped.
+
+Each redaction is logged (KIND + WHERE, never the secret) to `redactions_log`:
+
+```bash
+python scripts/redactions_report.py
+```
+
+Cleanup is more expensive than prevention — wiping a secret from `chunks`
+after the fact would also force re-embedding. Scrubbing at the ingest
+boundary side-steps that whole class of cleanup.
+
 ## Next phases
 
 - **5 (remaining)** — memscope Pipeline + Search + Ingest views;

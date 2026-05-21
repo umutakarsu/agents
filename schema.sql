@@ -91,3 +91,15 @@ CREATE INDEX IF NOT EXISTS idx_memory_fts
 -- ACL pre-filter touches this on every query; index the lookup + array overlap.
 CREATE INDEX IF NOT EXISTS idx_chunk_acl_lookup
     ON chunk_acl USING gin (allowed_principals);
+
+-- Privacy filter audit log (phase 6)
+CREATE TABLE IF NOT EXISTS redactions_log (
+    id          BIGSERIAL PRIMARY KEY,
+    workspace   TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    source_id   TEXT NOT NULL,
+    kind        TEXT NOT NULL,           -- 'aws_access_key', 'openai_api_key', etc.
+    count       INT NOT NULL,            -- how many matches replaced
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS redactions_log_workspace_idx ON redactions_log (workspace, occurred_at DESC);
