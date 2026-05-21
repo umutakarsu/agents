@@ -2,73 +2,363 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>memscope -- memory DAG</title>
+  <title>memscope</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <!-- app.js MUST load before Alpine CDN so memscope() is defined before x-data evaluates. -->
   <script defer src="/static/app.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js"></script>
 </head>
 <body>
-  <header>
-    <h1>memscope</h1>
-    <span class="subtitle">memory DAG inspector -- pick a workspace + entity, watch conflicts resolve</span>
-  </header>
+  <div x-data="memscope()" x-init="init()" class="app">
 
-  <main x-data="memscope()" x-init="init()">
-    <section class="controls">
-      <label>
-        workspace
-        <select x-model="workspace" @change="loadEntities()">
-          <option value="">(pick one)</option>
-          <template x-for="w in wsList" :key="w">
-            <option :value="w" x-text="w"></option>
-          </template>
-        </select>
-      </label>
+    <header class="topbar">
+      <div class="brand">
+        <h1>memscope</h1>
+        <span class="subtitle">memory inspector</span>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button class="tab" role="tab" :class="{ active: tab === 'dag' }" @click="tab = 'dag'">DAG</button>
+        <button class="tab" role="tab" :class="{ active: tab === 'search' }" @click="tab = 'search'">Search</button>
+        <button class="tab" role="tab" :class="{ active: tab === 'pipeline' }" @click="tab = 'pipeline'">Pipeline</button>
+      </nav>
+    </header>
 
-      <label>
-        entity_key
-        <select x-model="entityKey" @change="loadDag()" :disabled="!workspace">
-          <option value="">(pick one)</option>
-          <template x-for="e in entityList" :key="e.entity_key">
-            <option :value="e.entity_key"
-                    x-text="`${e.entity_key} (${e.versions} version${e.versions === 1 ? '' : 's'})`">
-            </option>
-          </template>
-        </select>
-      </label>
+    <main class="content">
 
-      <button @click="loadDag()" :disabled="!workspace || !entityKey">reload</button>
-    </section>
+      <!-- =========================== DAG VIEW =========================== -->
+      <section x-show="tab === 'dag'" class="view">
 
-    <section x-show="error" class="error" x-text="error"></section>
+        <div class="toolbar">
+          <div class="field">
+            <label>workspace</label>
+            <select x-model="workspace" @change="loadEntities()">
+              <option value="">(pick one)</option>
+              <template x-for="w in wsList" :key="w">
+                <option :value="w" x-text="w"></option>
+              </template>
+            </select>
+          </div>
 
-    <template x-if="dag">
-      <section class="dag-host">
-        <div class="legend">
-          <span><span class="dot human"></span>human</span>
-          <span><span class="dot system"></span>system</span>
-          <span><span class="dot agent"></span>agent</span>
-          <span><span class="dot current"></span>current (no outgoing supersede edge)</span>
-          <span class="hint">click a node for full content</span>
+          <div class="field">
+            <label>entity_key</label>
+            <select x-model="entityKey" @change="loadDag()" :disabled="!workspace">
+              <option value="">(pick one)</option>
+              <template x-for="e in entityList" :key="e.entity_key">
+                <option :value="e.entity_key"
+                        x-text="`${e.entity_key} (${e.versions} version${e.versions === 1 ? '' : 's'})`">
+                </option>
+              </template>
+            </select>
+          </div>
+
+          <button class="btn primary" @click="loadDag()" :disabled="!workspace || !entityKey">reload</button>
         </div>
 
-        <template x-if="dag.nodes.length === 0">
-          <p class="empty">no memory rows for this entity</p>
+        <div x-show="dagError" class="error" x-text="dagError"></div>
+
+        <template x-if="dag">
+          <div class="dag-section">
+            <div class="legend">
+              <span><span class="chip chip-human">HUMAN</span></span>
+              <span><span class="chip chip-system">SYSTEM</span></span>
+              <span><span class="chip chip-agent">AGENT</span></span>
+              <span class="legend-current"><span class="dot-current"></span>current</span>
+              <span class="hint">click a node for full content</span>
+            </div>
+
+            <template x-if="dag.nodes.length === 0">
+              <p class="empty">no memory rows for this entity</p>
+            </template>
+
+            <div class="dag-layout" x-show="dag.nodes.length > 0">
+              <div class="dag-svg panel" x-html="renderSvg()"></div>
+              <aside class="detail panel">
+                <template x-if="selected">
+                  <div>
+                    <div class="detail-head">
+                      <span class="detail-id mono" x-text="`#${selected.id}`"></span>
+                      <span class="chip" :class="`chip-${selected.source_type}`" x-text="selected.source_type.toUpperCase()"></span>
+                      <span class="chip chip-conf mono" x-text="`c=${selected.confidence}`"></span>
+                    </div>
+                    <dl class="detail-meta">
+                      <dt>source_id</dt><dd class="mono" x-text="selected.source_id"></dd>
+                      <dt>created</dt><dd class="mono" x-text="selected.created_at"></dd>
+                      <dt>status</dt>
+                      <dd>
+                        <span x-show="selected.is_current" class="chip chip-current">CURRENT</span>
+                        <span x-show="!selected.is_current" class="chip chip-superseded">superseded</span>
+                      </dd>
+                    </dl>
+                    <blockquote class="mono" x-text="selected.content"></blockquote>
+                  </div>
+                </template>
+                <template x-if="!selected">
+                  <div class="hint-card">
+                    <div class="hint-title">Select a node</div>
+                    <p>Click any memory card on the left to see its full content,
+                       provenance, and where it sits in the supersede chain.</p>
+                  </div>
+                </template>
+              </aside>
+            </div>
+          </div>
         </template>
 
-        <div class="dag-layout" x-show="dag.nodes.length > 0">
-          <div class="dag-svg" x-html="renderSvg()"></div>
-          <aside class="detail" x-show="selected">
-            <h3 x-text="`#${selected?.id}`"></h3>
-            <p><span>source</span><strong x-text="`${selected?.source_type}:${selected?.source_id}`"></strong></p>
-            <p><span>confidence</span><strong x-text="selected?.confidence"></strong></p>
-            <p><span>created</span><strong x-text="selected?.created_at"></strong></p>
-            <p><span>status</span><strong x-text="selected?.is_current ? 'CURRENT' : 'superseded'"></strong></p>
-            <blockquote x-text="selected?.content"></blockquote>
-          </aside>
-        </div>
+        <template x-if="!dag && !dagError">
+          <p class="empty">pick a workspace and entity to inspect its memory DAG</p>
+        </template>
       </section>
-    </template>
-  </main>
+
+      <!-- ========================== SEARCH VIEW ========================== -->
+      <section x-show="tab === 'search'" class="view">
+
+        <div class="toolbar">
+          <div class="field">
+            <label>workspace</label>
+            <select x-model="searchWorkspace">
+              <option value="">(pick one)</option>
+              <template x-for="w in wsList" :key="w">
+                <option :value="w" x-text="w"></option>
+              </template>
+            </select>
+          </div>
+
+          <div class="field grow">
+            <label>principals <span class="field-hint">comma-separated</span></label>
+            <input type="text" x-model="searchPrincipals" placeholder="group:all" />
+          </div>
+
+          <div class="field narrow">
+            <label>k</label>
+            <input type="number" min="1" max="100" x-model.number="searchK" />
+          </div>
+
+          <button class="btn primary" @click="runSearch()" :disabled="!searchWorkspace || !searchQuery">search</button>
+        </div>
+
+        <div class="example-pills">
+          <span class="pills-label">try:</span>
+          <button class="pill" @click="setExample('group:all')">
+            as <span class="mono">group:all</span>
+          </button>
+          <button class="pill" @click="setExample('group:exec')">
+            as <span class="mono">group:exec</span>
+          </button>
+          <span class="pills-hint">flip principals to see the ACL pre-filter at work</span>
+        </div>
+
+        <div class="search-box panel">
+          <textarea
+            x-model="searchQuery"
+            @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); runSearch(); }"
+            placeholder="enter a query (press Enter to submit, shift-enter for newline)"
+            rows="2"></textarea>
+        </div>
+
+        <div x-show="searchError" class="error" x-text="searchError"></div>
+
+        <template x-if="searchRan && !searchLoading">
+          <div class="search-results">
+            <template x-if="searchHits.length === 0">
+              <div class="panel empty-card">
+                <div class="empty-title">(no visible results for these principals)</div>
+                <p class="empty-body">
+                  The ACL pre-filter runs in SQL inside both retrieval arms,
+                  so forbidden chunks are never ranked. Try widening
+                  <span class="mono">principals</span> (e.g. add <span class="mono">group:exec</span>).
+                </p>
+              </div>
+            </template>
+
+            <template x-if="searchHits.length > 0">
+              <div>
+                <div class="results-summary">
+                  <span x-text="`${searchHits.length} hit${searchHits.length === 1 ? '' : 's'}`"></span>
+                  <span class="results-meta">
+                    principals:
+                    <template x-for="p in searchPrincipalsList" :key="p">
+                      <span class="pill-mini mono" x-text="p"></span>
+                    </template>
+                  </span>
+                </div>
+                <template x-for="h in searchHits" :key="`${h.kind}:${h.id}`">
+                  <div class="hit panel">
+                    <div class="hit-head">
+                      <span class="chip" :class="`chip-kind-${h.kind}`" x-text="h.kind.toUpperCase()"></span>
+                      <span class="hit-id mono" x-text="`#${h.id}`"></span>
+                      <div class="arms">
+                        <template x-for="a in h.arms" :key="a">
+                          <span class="pill-arm" :class="`arm-${a}`" x-text="a"></span>
+                        </template>
+                      </div>
+                      <span class="hit-score mono" x-text="h.score.toFixed(4)"></span>
+                    </div>
+                    <p class="hit-text mono" :class="{ dim: h.text.length > 200 }" x-text="h.text"></p>
+                    <template x-if="h.kind === 'memory'">
+                      <div class="hit-foot">
+                        <span x-show="h.provenance">
+                          provenance <span class="mono" x-text="h.provenance"></span>
+                        </span>
+                        <span x-show="h.confidence !== null && h.confidence !== undefined">
+                          confidence <span class="mono" x-text="h.confidence"></span>
+                        </span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <template x-if="searchLoading">
+          <p class="empty">searching...</p>
+        </template>
+
+        <template x-if="!searchRan && !searchLoading">
+          <p class="empty">pick a workspace and run a query to see hits</p>
+        </template>
+      </section>
+
+      <!-- ========================= PIPELINE VIEW ========================= -->
+      <section x-show="tab === 'pipeline'" class="view">
+
+        <div class="toolbar">
+          <div class="field">
+            <label>workspace</label>
+            <select x-model="pipelineWorkspace" @change="loadStats()">
+              <option value="">(pick one)</option>
+              <template x-for="w in wsList" :key="w">
+                <option :value="w" x-text="w"></option>
+              </template>
+            </select>
+          </div>
+          <button class="btn ghost" @click="loadStats()" :disabled="!pipelineWorkspace">refresh stats</button>
+        </div>
+
+        <div x-show="pipelineError" class="error" x-text="pipelineError"></div>
+
+        <template x-if="stats">
+          <div class="stats-block">
+            <div class="metric-grid">
+              <div class="metric panel">
+                <div class="metric-num" x-text="stats.raw_events.toLocaleString()"></div>
+                <div class="metric-label">raw events</div>
+              </div>
+              <div class="metric panel">
+                <div class="metric-num" x-text="stats.chunks_in_workspace.toLocaleString()"></div>
+                <div class="metric-label">chunks</div>
+              </div>
+              <div class="metric panel">
+                <div class="metric-num" x-text="stats.unique_content_hashes_in_workspace.toLocaleString()"></div>
+                <div class="metric-label">unique content hashes</div>
+              </div>
+              <div class="metric panel">
+                <div class="metric-num" x-text="stats.total_embeddings.toLocaleString()"></div>
+                <div class="metric-label">total embeddings</div>
+              </div>
+              <div class="metric panel">
+                <div class="metric-num" x-text="stats.memory_rows.toLocaleString()"></div>
+                <div class="metric-label">memory rows</div>
+              </div>
+            </div>
+
+            <div class="panel by-source-card">
+              <div class="card-title">by source</div>
+              <table class="by-source">
+                <thead>
+                  <tr><th>source</th><th>items</th></tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in stats.by_source" :key="row.source">
+                    <tr>
+                      <td><span class="chip" :class="`chip-${row.source}`" x-text="row.source.toUpperCase()"></span></td>
+                      <td class="mono num" x-text="row.items.toLocaleString()"></td>
+                    </tr>
+                  </template>
+                  <template x-if="stats.by_source.length === 0">
+                    <tr><td colspan="2" class="empty-row">(no events recorded)</td></tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+
+        <div class="panel actions">
+          <div class="card-title">Re-ingest</div>
+          <p class="card-sub">
+            Re-running an ingest against the same content should compute zero new embeddings &mdash;
+            that's the dedup gate firing.
+          </p>
+          <div class="action-row">
+            <button class="btn primary"
+                    @click="ingest('sample_docs', ['group:all'])"
+                    :disabled="!pipelineWorkspace || ingestLoading">
+              Re-ingest <span class="mono">sample_docs</span>
+            </button>
+            <button class="btn primary"
+                    @click="ingest('sample_docs_restricted', ['group:exec'])"
+                    :disabled="!pipelineWorkspace || ingestLoading">
+              Re-ingest <span class="mono">sample_docs_restricted</span>
+              <span class="btn-sub">group:exec only</span>
+            </button>
+          </div>
+
+          <template x-if="ingestLoading">
+            <p class="empty inline">running ingest...</p>
+          </template>
+
+          <template x-if="ingestResult">
+            <div class="result-card" :class="{ 'dedup-fired': ingestResult.embeddings_computed === 0 }">
+              <div class="result-head">
+                <span x-show="ingestResult.embeddings_computed === 0" class="chip chip-dedup">DEDUP GATE FIRED</span>
+                <span x-show="ingestResult.embeddings_computed > 0" class="chip chip-fresh">FRESH EMBEDDINGS</span>
+                <span class="result-target mono" x-text="ingestResult._target"></span>
+              </div>
+              <div class="result-grid">
+                <div>
+                  <div class="result-num" x-text="ingestResult.items"></div>
+                  <div class="result-label">items</div>
+                </div>
+                <div>
+                  <div class="result-num" x-text="ingestResult.chunks"></div>
+                  <div class="result-label">chunks</div>
+                </div>
+                <div>
+                  <div class="result-num"
+                       :class="{ accent: ingestResult.embeddings_computed > 0 }"
+                       x-text="ingestResult.embeddings_computed"></div>
+                  <div class="result-label">embeddings computed</div>
+                </div>
+                <div>
+                  <div class="result-num"
+                       :class="{ accent: ingestResult.embeddings_computed === 0 }"
+                       x-text="ingestResult.embeddings_reused"></div>
+                  <div class="result-label">embeddings reused</div>
+                </div>
+              </div>
+              <p class="result-note" x-show="ingestResult.embeddings_computed === 0">
+                Identical content hashes already had embeddings &mdash;
+                the gate skipped the embedding call entirely.
+              </p>
+              <p class="result-note" x-show="ingestResult.embeddings_computed > 0">
+                New content was embedded.
+                <span x-show="ingestResult.embeddings_reused > 0">
+                  Reused <span class="mono" x-text="ingestResult.embeddings_reused"></span>
+                  existing embeddings for unchanged chunks.
+                </span>
+              </p>
+            </div>
+          </template>
+        </div>
+
+        <template x-if="!stats && !pipelineError && !pipelineWorkspace">
+          <p class="empty">pick a workspace to see pipeline stats</p>
+        </template>
+      </section>
+
+    </main>
+  </div>
 </body>
 </html>
