@@ -240,6 +240,11 @@ def board() -> FileResponse:
     return FileResponse(str(STATIC / "board.html"))
 
 
+@app.get("/tour")
+def tour() -> FileResponse:
+    return FileResponse(str(STATIC / "tour.html"))
+
+
 # ---------------------------------------------------------------------------
 # Phase 7: identity unification endpoints.
 #
