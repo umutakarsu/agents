@@ -22,11 +22,17 @@ surface gets ``last_referenced_at = now()`` bumped in a single bulk UPDATE.
 
 from dataclasses import dataclass
 
+from memlayer import federated
 from memlayer.db import connect
 from memlayer.decay import effective_confidence_sql
 from memlayer.embeddings import embed
 
 RRF_K = 60  # standard RRF dampening constant
+
+# Cap on how many federated synonym terms we OR into the lexical query. More
+# than a handful and the expansion starts pulling in loosely-related noise
+# that drowns the original intent, so we keep it conservative.
+_MAX_EXPANSIONS = 3
 
 
 @dataclass
@@ -201,13 +207,48 @@ def _reinforce_memory(cur, mem_ids: list[int]) -> None:
 def search(
     query: str, workspace: str, principals: list[str], k: int = 10
 ) -> list[Hit]:
+    """Backward-compatible entry point: returns only the Hits.
+
+    Kept stable for the CLI (scripts/search.py) and any other caller that
+    only wants results. Internally delegates to ``search_with_expansions``
+    and discards the expansion list."""
+    hits, _expansions = search_with_expansions(query, workspace, principals, k=k)
+    return hits
+
+
+def search_with_expansions(
+    query: str, workspace: str, principals: list[str], k: int = 10
+) -> tuple[list[Hit], list[str]]:
+    """Hybrid retrieval plus the federated query-expansion terms used.
+
+    The lexical arms (fts, and the memory arm) are widened with cross-tenant
+    synonym concepts so a query for "pull request feedback" also matches
+    documents phrased as "code review". The expansion is purely lexical, so
+    the vector arm stays on the *original* query (its embedding already
+    captures semantic neighbours; re-embedding a term-soup would only blur
+    intent).
+
+    Safety: expansions are capped at ``_MAX_EXPANSIONS`` terms, and when
+    ``expand_query`` returns nothing this behaves byte-for-byte like the old
+    single-query path. Returns ``(hits, expansions)``."""
     qvec = embed(query)
+
+    # Federated lexical expansion. Reads only cross-tenant aggregate tables
+    # (concept / concept_synonym) -- workspace-agnostic and privacy-safe.
+    expansions = federated.expand_query(query)[:_MAX_EXPANSIONS]
+    # Widen the lexical query only when we actually have expansions; otherwise
+    # the expanded string IS the original query and behaviour is unchanged.
+    lexical_query = query
+    if expansions:
+        lexical_query = query + " " + " ".join(expansions)
+
     arm_k = max(k * 2, 20)  # over-fetch so fusion has signal beyond the cut
     with connect() as conn, conn.cursor() as cur:
         vec_ids = _vector_arm(cur, qvec, workspace, principals, arm_k)
-        fts_ids = _fts_arm(cur, query, workspace, principals, arm_k)
+        # Lexical arms run on the expanded query so synonyms widen recall.
+        fts_ids = _fts_arm(cur, lexical_query, workspace, principals, arm_k)
         mem_ids_ranked, eff_map = _memory_arm(
-            cur, query, workspace, principals, arm_k
+            cur, lexical_query, workspace, principals, arm_k
         )
         rankings = {
             "vector": vec_ids,
@@ -219,7 +260,7 @@ def search(
         # fused ranking even if it scored high on ts_rank.
         fused = rrf_fuse(rankings, weights=eff_map)[:k]
         if not fused:
-            return []
+            return [], expansions
         hits = _hydrate(cur, fused, eff_map)
         # Reinforce every memory row that actually surfaced in the result.
         # Single bulk UPDATE -- one round-trip regardless of result count.
@@ -236,4 +277,4 @@ def search(
             continue
         h.score, h.arms = score, arms
         result.append(h)
-    return result
+    return result, expansions

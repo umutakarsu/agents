@@ -336,3 +336,102 @@ def post_reject_merge(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Phase 8-10 inspector endpoints: governance conflicts, compression lineage,
+# federated concepts, privacy-filter redactions, decay preview.
+#
+# Same auth contract as the rest of the API: every endpoint takes
+# Depends(current_user) and, where a workspace is named, calls
+# _require_workspace so cross-workspace reads are rejected with 403. ACL-scoped
+# reads pass user.principals through to the view layer's SQL pre-filter.
+# ---------------------------------------------------------------------------
+
+from memscope.views import (  # noqa: E402  -- intentional append-at-end
+    compression_view,
+    concepts_view,
+    decay_preview,
+    governance_conflicts,
+    lookup_conflict,
+    redactions_view,
+)
+from memlayer import governance  # noqa: E402
+
+
+class ResolveConflictRequest(BaseModel):
+    winner_row_id: int
+
+
+@app.get("/api/governance/conflicts")
+def get_governance_conflicts(
+    workspace: str,
+    user: User = Depends(current_user),
+) -> dict:
+    _require_workspace(user, workspace)
+    return {
+        "workspace": workspace,
+        "conflicts": governance_conflicts(workspace),
+    }
+
+
+@app.post("/api/governance/conflicts/{conflict_id}/resolve")
+def post_resolve_conflict(
+    conflict_id: int,
+    req: ResolveConflictRequest,
+    user: User = Depends(current_user),
+) -> dict:
+    # Look up the conflict's workspace + disputed rows first so we can
+    # authorize on the workspace (the conflict_id alone doesn't carry it).
+    conflict = lookup_conflict(conflict_id)
+    if conflict is None:
+        raise HTTPException(status_code=404, detail="conflict not found")
+    _require_workspace(user, conflict["workspace"])
+    try:
+        governance.resolve_conflict(
+            conflict["workspace"],
+            conflict["row_a"],
+            conflict["row_b"],
+            resolved_by=user.email,
+            winner_id=req.winner_row_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.get("/api/compression/{workspace}/{entity_key:path}")
+def get_compression(
+    workspace: str,
+    entity_key: str,
+    user: User = Depends(current_user),
+) -> dict:
+    _require_workspace(user, workspace)
+    return compression_view(workspace, entity_key, user.principals)
+
+
+@app.get("/api/concepts")
+def get_concepts(
+    workspace: str,
+    user: User = Depends(current_user),
+) -> dict:
+    _require_workspace(user, workspace)
+    return concepts_view(workspace)
+
+
+@app.get("/api/pipeline/redactions")
+def get_pipeline_redactions(
+    workspace: str,
+    user: User = Depends(current_user),
+) -> dict:
+    _require_workspace(user, workspace)
+    return redactions_view(workspace)
+
+
+@app.get("/api/decay/preview")
+def get_decay_preview(
+    workspace: str,
+    user: User = Depends(current_user),
+) -> dict:
+    _require_workspace(user, workspace)
+    return decay_preview(workspace)
