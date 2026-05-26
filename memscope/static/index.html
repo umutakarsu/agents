@@ -21,6 +21,7 @@
         <button class="tab" role="tab" :class="{ active: tab === 'search' }" @click="tab = 'search'">Search</button>
         <button class="tab" role="tab" :class="{ active: tab === 'pipeline' }" @click="tab = 'pipeline'">Pipeline</button>
         <button class="tab" role="tab" :class="{ active: tab === 'identities' }" @click="tab = 'identities'">Identities</button>
+        <button class="tab" role="tab" :class="{ active: tab === 'insights' }" @click="tab = 'insights'; loadInsights()">Insights</button>
       </nav>
       <div class="topbar-right">
         <button class="topbar-home" x-show="view !== 'home'" @click="showHome()" aria-label="Back to home" title="Back to home">
@@ -404,6 +405,30 @@
             <div class="scenario-cta">Run scenario &rarr;</div>
           </button>
 
+          <!-- Scenario E: the moat / insights -->
+          <button type="button" class="scenario-card" @click="runScenarioInsights()">
+            <div class="scenario-visual visual-insights" aria-hidden="true">
+              <div class="vis-insight-chip vis-insight-conflict">
+                <span class="vis-insight-tag">CONFLICT</span>
+                <span class="vis-insight-eq">= a human decides</span>
+              </div>
+              <div class="vis-insight-chip vis-insight-concept">
+                <span class="vis-insight-tag">"code review"</span>
+                <span class="vis-insight-eq">seen in 6 teams</span>
+              </div>
+              <div class="vis-insight-chip vis-insight-decay">
+                <span class="vis-insight-tag">old memory</span>
+                <div class="vis-insight-bar"><div class="vis-insight-bar-fill"></div></div>
+              </div>
+            </div>
+            <h3 class="scenario-title">See the memory get smarter and stay honest</h3>
+            <p class="scenario-sub">
+              Conflicts a human must settle, concepts learned across every workspace,
+              and old memories fading on their own &mdash; the properties that compound.
+            </p>
+            <div class="scenario-cta">Run scenario &rarr;</div>
+          </button>
+
         </div>
 
         <div class="landing-foot">
@@ -542,6 +567,37 @@
                     <blockquote class="mono" x-text="selected.content"></blockquote>
                   </div>
                 </template>
+
+                <!-- Distilled summary + lineage. Every summary sentence traces
+                     back to a real source row -- no hallucination. -->
+                <template x-if="compression && compression.summaries && compression.summaries.length > 0">
+                  <div class="compression-block">
+                    <template x-for="s in compression.summaries" :key="s.summary_id">
+                      <div class="compression-card">
+                        <div class="compression-head">
+                          <span class="chip chip-kind-memory">DISTILLED SUMMARY</span>
+                          <span class="compression-paren tip-paren">(semantic compression)</span>
+                        </div>
+                        <p class="compression-text" x-text="s.content"></p>
+                        <div class="compression-lineage-title">
+                          Where each sentence came from <span class="tip-paren">(lineage)</span>
+                        </div>
+                        <div class="compression-lineage">
+                          <template x-for="sent in s.sentences" :key="sent.sentence_index">
+                            <details class="lineage-row">
+                              <summary>
+                                <span class="lineage-sent" x-text="sent.sentence"></span>
+                                <span class="lineage-from mono" x-text="`from #${sent.source_row_id}`"></span>
+                              </summary>
+                              <blockquote class="mono lineage-source" x-text="sent.source_content"></blockquote>
+                            </details>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+
                 <template x-if="!selected">
                   <div class="hint-card">
                     <div class="hint-title">Select a node</div>
@@ -684,6 +740,14 @@
 
             <template x-if="searchHits.length > 0">
               <div>
+                <!-- Federated query expansion: the cross-workspace concept layer
+                     widened this query with related terms it learned elsewhere. -->
+                <div class="expansion-line" x-show="searchExpansions.length > 0">
+                  <span class="expansion-label">Also searched related concepts <span class="tip-paren">(federated query expansion)</span>:</span>
+                  <template x-for="t in searchExpansions" :key="t">
+                    <span class="expansion-chip mono" x-text="t"></span>
+                  </template>
+                </div>
                 <div class="results-summary">
                   <span x-text="`${searchHits.length} hit${searchHits.length === 1 ? '' : 's'}`"></span>
                   <span class="results-meta">
@@ -923,6 +987,48 @@
                 </span>
               </p>
             </div>
+          </template>
+        </div>
+
+        <!-- Privacy filter: secrets stripped at ingest -->
+        <div class="panel actions" x-show="pipelineWorkspace">
+          <div class="card-title">
+            Secrets stripped at ingest
+            <span class="tip" data-tip="Before any content is embedded or stored, a privacy filter redacts secrets (API keys, tokens, emails). This is the audit log of what it caught.">
+              <span class="tip-paren">(privacy filter)</span>
+              <span class="tip-icon">&#9432;</span>
+            </span>
+          </div>
+          <p class="card-sub">
+            Every source item passes through a redaction filter before it's stored.
+            Nothing secret ever lands in the index.
+          </p>
+
+          <div x-show="redactionsError" class="error" x-text="redactionsError"></div>
+
+          <template x-if="!redactionsError && redactions.length > 0">
+            <table class="by-source redaction-table">
+              <thead>
+                <tr><th>kind</th><th>count</th><th>source</th><th>when</th></tr>
+              </thead>
+              <tbody>
+                <template x-for="r in redactions" :key="`${r.kind}:${r.source}:${r.source_id}:${r.occurred_at}`">
+                  <tr>
+                    <td><span class="chip chip-redact" x-text="r.kind"></span></td>
+                    <td class="mono num" x-text="r.count"></td>
+                    <td>
+                      <span class="chip" :class="`chip-${r.source}`" x-text="(r.source || '').toUpperCase()"></span>
+                      <span class="redact-srcid mono" x-show="r.source_id" x-text="r.source_id"></span>
+                    </td>
+                    <td class="mono redact-when" x-text="r.occurred_at"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </template>
+
+          <template x-if="!redactionsError && redactions.length === 0">
+            <p class="empty inline">No secrets detected in this workspace's sources.</p>
           </template>
         </div>
 
@@ -1183,6 +1289,231 @@
         <template x-if="!identitiesWorkspace">
           <p class="empty">pick a workspace to see its identities</p>
         </template>
+      </section>
+
+      <!-- ========================= INSIGHTS VIEW ========================= -->
+      <section x-show="tab === 'insights'" class="view">
+
+        <!-- One-sentence banner -->
+        <div class="view-banner" x-show="!insightsBannerDismissed">
+          <span class="view-banner-icon">&#9432;</span>
+          <span class="view-banner-text">
+            This view shows the memory getting smarter and staying honest: conflicts a human must
+            settle, concepts learned across every workspace, and old memories fading on their own.
+          </span>
+          <button class="view-banner-close" @click="insightsBannerDismissed = true" aria-label="Dismiss">&times;</button>
+        </div>
+
+        <div class="view-header">
+          <div class="view-title-block">
+            <h2 class="view-title">Insights</h2>
+            <p class="view-subtitle">Where memory stays honest: conflicts, shared concepts, and graceful forgetting.</p>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <div class="field">
+            <label>
+              Team / project
+              <span class="tip" data-tip="A workspace is a tenant boundary. All memory is partitioned by workspace.">
+                <span class="tip-paren">(workspace)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+            </label>
+            <select x-model="insightsWorkspace" @change="loadInsights()">
+              <option value="">(pick one)</option>
+              <template x-for="w in wsList" :key="w">
+                <option :value="w" x-text="w"></option>
+              </template>
+            </select>
+          </div>
+          <button class="btn ghost" @click="loadInsights()" :disabled="!insightsWorkspace">refresh</button>
+        </div>
+
+        <template x-if="!insightsWorkspace">
+          <p class="empty">pick a workspace to see its insights</p>
+        </template>
+
+        <!-- a. Governance conflicts -->
+        <div class="insight-section" x-show="insightsWorkspace">
+          <div class="insight-section-head">
+            <h3 class="insight-section-title">
+              Conflicts a human must settle
+              <span class="tip" data-tip="When two memory rows about the same thing have equal authority, the system refuses to silently pick a winner. A human decides.">
+                <span class="tip-paren">(governance conflict resolution)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+            </h3>
+          </div>
+
+          <div x-show="conflictsError" class="error" x-text="conflictsError"></div>
+
+          <template x-if="!conflictsError && conflicts.length > 0">
+            <div class="conflict-list">
+              <template x-for="c in conflicts" :key="c.id">
+                <div class="conflict-card panel">
+                  <div class="conflict-card-head">
+                    <span class="chip chip-conflict">CONFLICT</span>
+                    <span class="mono conflict-key" x-text="c.entity_key"></span>
+                    <span class="conflict-when mono" x-text="c.detected_at"></span>
+                  </div>
+                  <div class="conflict-pair">
+                    <div class="conflict-row">
+                      <blockquote class="mono" x-text="c.row_a.content"></blockquote>
+                      <div class="conflict-row-meta">
+                        <span class="chip" :class="`chip-${c.row_a.source_type}`" x-text="(c.row_a.source_type || '').toUpperCase()"></span>
+                        <span class="conflict-auth mono" x-text="`authority ${c.row_a.authority}`"></span>
+                      </div>
+                      <button class="btn primary conflict-keep" @click="resolveConflict(c.id, c.row_a.id)" :disabled="conflictBusy === c.id">
+                        Keep this one
+                      </button>
+                    </div>
+                    <div class="conflict-versus">
+                      <div class="conflict-versus-badge">=</div>
+                      <div class="conflict-versus-note">equal authority &mdash; a human must decide</div>
+                    </div>
+                    <div class="conflict-row">
+                      <blockquote class="mono" x-text="c.row_b.content"></blockquote>
+                      <div class="conflict-row-meta">
+                        <span class="chip" :class="`chip-${c.row_b.source_type}`" x-text="(c.row_b.source_type || '').toUpperCase()"></span>
+                        <span class="conflict-auth mono" x-text="`authority ${c.row_b.authority}`"></span>
+                      </div>
+                      <button class="btn primary conflict-keep" @click="resolveConflict(c.id, c.row_b.id)" :disabled="conflictBusy === c.id">
+                        Keep this one
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <template x-if="!conflictsError && conflicts.length === 0">
+            <div class="panel insight-empty">
+              No open conflicts &mdash; authority resolved everything automatically.
+            </div>
+          </template>
+        </div>
+
+        <!-- b. Federated concepts -->
+        <div class="insight-section" x-show="insightsWorkspace">
+          <div class="insight-section-head">
+            <h3 class="insight-section-title">
+              Concepts shared across all workspaces
+              <span class="tip" data-tip="Concept names (not content) are learned across every tenant. A concept seen in many teams is more reliable; nothing about any workspace's actual data is shared.">
+                <span class="tip-paren">(federated concept graph)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+            </h3>
+            <p class="insight-explainer">
+              Concepts are learned across every workspace; no workspace's actual content is ever shared.
+            </p>
+          </div>
+
+          <div x-show="conceptsError" class="error" x-text="conceptsError"></div>
+
+          <template x-if="!conceptsError">
+            <div class="concepts-block">
+              <div class="concept-group">
+                <div class="concept-group-title">Shared across all workspaces</div>
+                <template x-if="conceptsGlobal.length > 0">
+                  <div class="concept-cloud">
+                    <template x-for="g in conceptsGlobal" :key="g.name">
+                      <span class="concept-chip global" :style="conceptChipStyle(g.tenant_count)">
+                        <span class="concept-name" x-text="g.name"></span>
+                        <span class="concept-meta" x-text="`(seen in ${g.tenant_count} team${g.tenant_count === 1 ? '' : 's'})`"></span>
+                      </span>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="conceptsGlobal.length === 0">
+                  <p class="empty inline">(no shared concepts yet)</p>
+                </template>
+              </div>
+
+              <div class="concept-group">
+                <div class="concept-group-title">This workspace's vocabulary</div>
+                <template x-if="conceptsLocal.length > 0">
+                  <div class="concept-cloud">
+                    <template x-for="l in conceptsLocal" :key="l.name">
+                      <span class="concept-chip local">
+                        <span class="concept-name" x-text="l.name"></span>
+                        <span class="concept-meta" x-text="`(${l.local_count}×)`"></span>
+                      </span>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="conceptsLocal.length === 0">
+                  <p class="empty inline">(no local concepts yet)</p>
+                </template>
+              </div>
+
+              <div class="concept-group" x-show="conceptsSynonyms.length > 0">
+                <div class="concept-group-title">Learned synonyms <span class="tip-paren">(cross-tenant co-occurrence)</span></div>
+                <div class="synonym-list">
+                  <template x-for="s in conceptsSynonyms" :key="`${s.a}:${s.b}`">
+                    <div class="synonym-row">
+                      <span class="synonym-pair mono">
+                        <span x-text="s.a"></span>
+                        <span class="synonym-arrows">&#8596;</span>
+                        <span x-text="s.b"></span>
+                      </span>
+                      <span class="synonym-meta mono" x-text="`${Math.round((s.confidence || 0) * 100)}% · ${s.cooccurrence_tenants} teams`"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- c. Decay preview -->
+        <div class="insight-section" x-show="insightsWorkspace">
+          <div class="insight-section-head">
+            <h3 class="insight-section-title">
+              Memories fading on their own
+              <span class="tip" data-tip="Low-tier, unreferenced memories lose effective confidence over time (Ebbinghaus forgetting curve). Once they drop below the keep-threshold they auto-evict. Durable facts never auto-evict.">
+                <span class="tip-paren">(Ebbinghaus decay)</span>
+                <span class="tip-icon">&#9432;</span>
+              </span>
+            </h3>
+            <p class="insight-explainer">
+              Old, unreferenced low-tier memories fade and auto-evict. Durable facts never auto-evict.
+            </p>
+          </div>
+
+          <div x-show="decayError" class="error" x-text="decayError"></div>
+
+          <template x-if="!decayError && decay">
+            <div class="decay-block">
+              <div class="decay-banner">
+                <span class="chip chip-preview">PREVIEW &mdash; nothing is deleted</span>
+                <span class="decay-summary"
+                      x-text="`${decay.evictable.working} working memories and ${decay.evictable.episodic} episodic summaries have faded below the keep-threshold.`"></span>
+              </div>
+              <template x-if="decay.examples && decay.examples.length > 0">
+                <div class="decay-examples">
+                  <template x-for="ex in decay.examples" :key="ex.id">
+                    <div class="decay-row">
+                      <span class="mono decay-id" x-text="`#${ex.id}`"></span>
+                      <span class="mono decay-key" x-text="ex.entity_key"></span>
+                      <span class="chip chip-tier" x-text="ex.tier"></span>
+                      <div class="decay-bar">
+                        <div class="decay-bar-fill" :style="`width: ${Math.round((ex.effective_confidence || 0) * 100)}%`"></div>
+                      </div>
+                      <span class="mono decay-conf" x-text="`${Math.round((ex.effective_confidence || 0) * 100)}%`"></span>
+                      <span class="decay-seen mono" x-text="`last seen ${ex.last_referenced_at}`"></span>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="!decay.examples || decay.examples.length === 0">
+                <p class="empty inline">(nothing close to the keep-threshold)</p>
+              </template>
+            </div>
+          </template>
+        </div>
+
       </section>
 
     </main>

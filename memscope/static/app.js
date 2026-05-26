@@ -96,6 +96,9 @@ function memscope() {
     dag: null,
     selected: null,
     dagError: '',
+    // Compression lineage for the currently-selected entity (moat feature).
+    // Loaded alongside the DAG; degrades silently if the endpoint is absent.
+    compression: null,
 
     // ---------- Search view ----------
     searchWorkspace: '',
@@ -106,6 +109,8 @@ function memscope() {
     searchRan: false,
     searchLoading: false,
     searchError: '',
+    // Federated query-expansion terms returned by /api/search (moat feature).
+    searchExpansions: [],
 
     // ---------- Pipeline view ----------
     pipelineWorkspace: '',
@@ -114,6 +119,9 @@ function memscope() {
     pipelineError: '',
     ingestLoading: false,
     ingestResult: null,
+    // Privacy-filter redaction log (moat feature). Loaded with stats.
+    redactions: [],
+    redactionsError: '',
 
     // ---------- Identities view (Phase 7) ----------
     // Identities are cross-source unifications: one canonical identity
@@ -129,6 +137,26 @@ function memscope() {
     identityDetails: null,         // /api/identity/{id}
     mergeProposals: [],
     proposalBusy: null,            // proposal id while approve/reject is in-flight
+
+    // ---------- Insights view (moat features) ----------
+    // The Insights tab surfaces the deep "moat" properties: governance
+    // conflict resolution, federated cross-tenant concepts, and Ebbinghaus
+    // decay. Each section loads independently and degrades gracefully (an
+    // inline error, never a crash) if its endpoint isn't available yet.
+    insightsWorkspace: '',
+    insightsBannerDismissed: false,
+    // Governance conflicts
+    conflicts: [],
+    conflictsError: '',
+    conflictBusy: null,            // conflict id while a resolve is in-flight
+    // Federated concepts
+    conceptsGlobal: [],
+    conceptsLocal: [],
+    conceptsSynonyms: [],
+    conceptsError: '',
+    // Decay preview
+    decay: null,
+    decayError: '',
 
     // =====================================================
     // init: identify the caller, then pull the workspace list.
@@ -348,6 +376,7 @@ function memscope() {
       this.entityList = [];
       this.dag = null;
       this.selected = null;
+      this.compression = null;
       this.dagError = '';
       if (!this.workspace) return;
       try {
@@ -365,6 +394,7 @@ function memscope() {
 
     async loadDag() {
       this.selected = null;
+      this.compression = null;
       this.dagError = '';
       if (!this.workspace || !this.entityKey) return;
       try {
@@ -374,6 +404,26 @@ function memscope() {
         this.dag = r;
       } catch (e) {
         this.dagError = `loading DAG: ${e.message}`;
+      }
+      // Compression lineage is a separate moat endpoint. Failure here is
+      // non-fatal -- the DAG still renders; the summary panel just hides.
+      await this.loadCompression();
+    },
+
+    // Distilled-summary lineage for the selected entity. Every summary
+    // sentence carries the source row it was derived from -- visible proof
+    // that compression never hallucinates. Degrades to null silently.
+    async loadCompression() {
+      this.compression = null;
+      if (!this.workspace || !this.entityKey) return;
+      try {
+        const r = await authFetch(
+          `/api/compression/${encodeURIComponent(this.workspace)}/${encodeURIComponent(this.entityKey)}`
+        ).then(this._json);
+        this.compression = r;
+      } catch (e) {
+        // No summary / endpoint unavailable: just show nothing.
+        this.compression = null;
       }
     },
 
@@ -407,6 +457,7 @@ function memscope() {
       this.searchLoading = true;
       this.searchRan = true;
       this.searchHits = [];
+      this.searchExpansions = [];
       // Principals come from the authenticated user. The on-screen "Who's
       // asking" field stays editable because the demo scenarios mutate it
       // to tell the audit story -- but it is no longer passed to the
@@ -417,6 +468,9 @@ function memscope() {
       try {
         const r = await authFetch(url).then(this._json);
         this.searchHits = r.hits || [];
+        // Federated query expansion: related terms the cross-workspace concept
+        // layer added to widen recall. Empty / absent -> render nothing.
+        this.searchExpansions = Array.isArray(r.expansions) ? r.expansions : [];
       } catch (e) {
         this.searchError = `search failed: ${e.message} (API may not be available yet)`;
       } finally {
@@ -444,6 +498,24 @@ function memscope() {
         this.stats = r;
       } catch (e) {
         this.pipelineError = `loading stats: ${e.message} (API may not be available yet)`;
+      }
+      // Redaction log is a separate moat endpoint; load it alongside stats
+      // but keep its failure isolated so the rest of the pipeline view works.
+      await this.loadRedactions();
+    },
+
+    // Privacy filter: what secrets were stripped at ingest for this workspace.
+    async loadRedactions() {
+      this.redactions = [];
+      this.redactionsError = '';
+      if (!this.pipelineWorkspace) return;
+      try {
+        const r = await authFetch(
+          `/api/pipeline/redactions?workspace=${encodeURIComponent(this.pipelineWorkspace)}`
+        ).then(this._json);
+        this.redactions = r.redactions || [];
+      } catch (e) {
+        this.redactionsError = `redaction log (not available): ${e.message}`;
       }
     },
 
@@ -558,6 +630,105 @@ function memscope() {
       } finally {
         this.proposalBusy = null;
       }
+    },
+
+    // =====================================================
+    // Insights view actions (moat features)
+    // =====================================================
+    // Load all three Insights sections. Each is independent: one endpoint
+    // 404ing (e.g. before the backend merge) must not blank the others.
+    async loadInsights() {
+      if (!this.insightsWorkspace) return;
+      await Promise.all([
+        this.loadConflicts(),
+        this.loadConcepts(),
+        this.loadDecay(),
+      ]);
+    },
+
+    async loadConflicts() {
+      this.conflictsError = '';
+      this.conflicts = [];
+      if (!this.insightsWorkspace) return;
+      try {
+        const r = await authFetch(
+          `/api/governance/conflicts?workspace=${encodeURIComponent(this.insightsWorkspace)}`
+        ).then(this._json);
+        this.conflicts = r.conflicts || [];
+      } catch (e) {
+        this.conflictsError = `conflicts (not available): ${e.message}`;
+      }
+    },
+
+    async resolveConflict(conflictId, winnerRowId) {
+      this.conflictBusy = conflictId;
+      try {
+        await authFetch(`/api/governance/conflicts/${encodeURIComponent(conflictId)}/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ winner_row_id: winnerRowId }),
+        }).then(this._json);
+        await this.loadConflicts();
+      } catch (e) {
+        this.conflictsError = `resolve failed: ${e.message}`;
+      } finally {
+        this.conflictBusy = null;
+      }
+    },
+
+    async loadConcepts() {
+      this.conceptsError = '';
+      this.conceptsGlobal = [];
+      this.conceptsLocal = [];
+      this.conceptsSynonyms = [];
+      if (!this.insightsWorkspace) return;
+      try {
+        const r = await authFetch(
+          `/api/concepts?workspace=${encodeURIComponent(this.insightsWorkspace)}`
+        ).then(this._json);
+        // Sort global concepts by how many tenants have seen them (descending)
+        // so the most broadly-learned concept reads first / biggest.
+        this.conceptsGlobal = (r.global || [])
+          .slice()
+          .sort((a, b) => (b.tenant_count || 0) - (a.tenant_count || 0));
+        this.conceptsLocal = r.local || [];
+        this.conceptsSynonyms = r.synonyms || [];
+      } catch (e) {
+        this.conceptsError = `concepts (not available): ${e.message}`;
+      }
+    },
+
+    // Size a global-concept chip by how many tenants have seen it. Maps the
+    // tenant count to a font size / weight band so cross-tenant breadth is
+    // legible at a glance.
+    conceptChipStyle(tenantCount) {
+      const n = Math.max(1, tenantCount || 1);
+      const size = Math.min(20, 12 + n);           // 13px..20px
+      const weight = n >= 4 ? 700 : (n >= 2 ? 600 : 500);
+      return `font-size: ${size}px; font-weight: ${weight};`;
+    },
+
+    async loadDecay() {
+      this.decayError = '';
+      this.decay = null;
+      if (!this.insightsWorkspace) return;
+      try {
+        const r = await authFetch(
+          `/api/decay/preview?workspace=${encodeURIComponent(this.insightsWorkspace)}`
+        ).then(this._json);
+        this.decay = r;
+      } catch (e) {
+        this.decayError = `decay preview (not available): ${e.message}`;
+      }
+    },
+
+    // ----- Scenario E: the moat -- smarter and honest (Insights, acme) -----
+    async runScenarioInsights() {
+      this.tab = 'insights';
+      this.insightsWorkspace = 'acme';
+      this.insightsBannerDismissed = false;
+      this.landingMode = false;
+      await this.loadInsights();
     },
 
     // Hub-and-spoke SVG: the identity is a center node, each alias is a
