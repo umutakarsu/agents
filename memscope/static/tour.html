@@ -130,13 +130,13 @@
       <div class="h2sub">Same question. The answer depends on <em>who's asking</em> — and it's enforced in the database, before anything is ranked.</div>
       <div class="qbar">
         <div class="qbox">secret roadmap acquire competitor</div>
-        <div class="princhip" id="p2"><span class="lbl">WHO'S ASKING</span><br/>group:all</div>
+        <div class="princhip" id="p2"><span class="lbl">WHO'S ASKING</span><br/>A regular employee</div>
       </div>
       <div class="results">
-        <div class="card"><span class="kind">chunk</span><span style="font:11px var(--mono);color:var(--muted)">Q4 Strategy</span><div class="txt">Our Q4 focus is the shared context layer every AI tool reads and writes.</div></div>
-        <div class="card"><span class="kind">chunk</span><span style="font:11px var(--mono);color:var(--muted)">Engineering Onboarding</span><div class="txt">Welcome. The memory layer is the core of what we build…</div></div>
+        <div class="card"><span class="kind">document</span><span style="font:11px var(--mono);color:var(--muted)">Q4 Strategy</span><div class="txt">Our Q4 focus is the shared context layer every AI tool reads and writes.</div></div>
+        <div class="card"><span class="kind">document</span><span style="font:11px var(--mono);color:var(--muted)">Engineering Onboarding</span><div class="txt">Welcome. The memory layer is the core of what we build…</div></div>
       </div>
-      <div class="caption">Asking as <b>group:all</b> — the secret roadmap is nowhere. It was never even ranked.</div>
+      <div class="caption">A regular employee asks — the secret roadmap is nowhere. It was never even shown to them.</div>
     </section>
 
     <!-- SCENE 3: search ACL, group:exec -->
@@ -149,14 +149,14 @@
       <div class="h2sub">Now ask as an exec. Nothing about the query changed — only the identity.</div>
       <div class="qbar">
         <div class="qbox">secret roadmap acquire competitor</div>
-        <div class="princhip exec"><span class="lbl">WHO'S ASKING</span><br/>group:exec</div>
+        <div class="princhip exec"><span class="lbl">WHO'S ASKING</span><br/>An executive</div>
       </div>
-      <div class="expansion">also searched related concepts: <span class="echip">code review</span><span class="echip">customer churn</span></div>
+      <div class="expansion">also searched related ideas: <span class="echip">code review</span><span class="echip">customer churn</span></div>
       <div class="results">
-        <div class="card" style="border-color:rgba(240,184,74,.4)"><span class="kind secret">restricted</span><span style="font:11px var(--mono);color:var(--current)">Confidential Exec Roadmap</span><div class="txt">## Secret roadmap — we plan to acquire a competitor in Q3 and rebuild retrieval on a new index.</div></div>
-        <div class="card"><span class="kind">chunk</span><span style="font:11px var(--mono);color:var(--muted)">Q4 Strategy</span><div class="txt">Our Q4 focus is the shared context layer…</div></div>
+        <div class="card" style="border-color:rgba(240,184,74,.4)"><span class="kind secret">restricted</span><span style="font:11px var(--mono);color:var(--current)">Confidential Exec Roadmap</span><div class="txt">Secret roadmap — we plan to acquire a competitor in Q3 and rebuild retrieval on a new index.</div></div>
+        <div class="card"><span class="kind">document</span><span style="font:11px var(--mono);color:var(--muted)">Q4 Strategy</span><div class="txt">Our Q4 focus is the shared context layer…</div></div>
       </div>
-      <div class="caption">As <b>group:exec</b> — the secret appears. Same query, different identity. The filter runs in SQL, so it can't be bypassed.</div>
+      <div class="caption">An executive asks the <b>exact same question</b> — now the secret appears. Only the person changed. The check is built into the data, so it can't be tricked.</div>
     </section>
 
     <!-- SCENE 4: memory DAG conflict resolution -->
