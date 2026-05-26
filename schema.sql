@@ -363,3 +363,8 @@ CREATE TABLE IF NOT EXISTS concept_synonym (
     UNIQUE (concept_a, concept_b),
     CHECK (concept_a < concept_b)
 );
+
+-- Phase 11: tier auto-promotion. reference_count complements last_referenced_at:
+-- the timestamp says "when last used", the count says "how proven". Promotion
+-- to semantic needs both age (survived decay) and use (count).
+ALTER TABLE memory ADD COLUMN IF NOT EXISTS reference_count INT NOT NULL DEFAULT 0;

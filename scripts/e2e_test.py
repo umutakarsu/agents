@@ -33,6 +33,10 @@ from memlayer.governance import (
     upsert_role,
 )
 from memlayer.ingest import SourceItem, ingest
+from memlayer.promote import (
+    promote_episodic_to_semantic,
+    promote_working_to_episodic,
+)
 from memlayer.retrieval import search
 from memlayer.scrub import scrub
 from memlayer.writeback import recall, remember
@@ -680,6 +684,134 @@ def main() -> None:
         len(expansions) >= 1,
     )
     print(f"  (expansion sample: {expansions[:5]})  synonyms_written={n_syn}")
+
+    print("Phase 11: tier auto-promotion (working->episodic->semantic)")
+    # 1. Seed 4 working rows for a synthetic entity. Distinct sentences with
+    # shared vocab ('cache', 'redis', 'latency') so centrality has signal.
+    promo_entity = "topic:promotion-test"
+    promo_seeded = []
+    promo_sources = [
+        "The cache layer uses redis for session storage.",
+        "Redis cache latency spiked during the incident.",
+        "We added a redis cache warmer to cut cold-start latency.",
+        "Cache hit rate on redis is now above 90 percent.",
+    ]
+    for i, content in enumerate(promo_sources):
+        mid, _ = remember(
+            WS, promo_entity, content,
+            "agent", f"promo-watcher-{i}",
+            confidence=0.7,
+            tier="working",
+        )
+        promo_seeded.append(mid)
+
+    w2e = promote_working_to_episodic(WS)
+    check(
+        "promote_working_to_episodic created >=1 episodic summary",
+        w2e["entities_compressed"] >= 1 and len(w2e["summaries_created"]) >= 1,
+    )
+    # The summary for our entity is the most recent episodic row for it.
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM memory "
+            "WHERE workspace = %s AND entity_key = %s AND tier = 'episodic' "
+            "ORDER BY id DESC LIMIT 1",
+            (WS, promo_entity),
+        )
+        summary_row = cur.fetchone()
+    promo_summary_id = summary_row[0] if summary_row else None
+    check(
+        "an episodic summary exists for the promoted entity",
+        promo_summary_id is not None and promo_summary_id in w2e["summaries_created"],
+    )
+    # The 4 working rows are flagged compressed_into=<summary>.
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, compressed_into FROM memory WHERE id = ANY(%s)",
+            (promo_seeded,),
+        )
+        promo_flags = cur.fetchall()
+    check(
+        "all 4 working rows flagged compressed_into=<summary>",
+        len(promo_flags) == len(promo_seeded)
+        and all(row[1] == promo_summary_id for row in promo_flags),
+    )
+
+    # 2. Simulate the summary being old + used. We pick values so the decay
+    # math clears the 0.5 effective-confidence cutoff:
+    #   episodic half-life = 14 days; effective = confidence * 0.5^(age/14d).
+    #   At age = 5 days, confidence = 0.9:
+    #     0.9 * 0.5^(5/14) = 0.9 * 0.5^0.357 = 0.9 * 0.781 = 0.703 >= 0.5  OK
+    # (10 days at conf 0.8 -> 0.8*0.5^(10/14)=0.487 < 0.5 would FAIL the cutoff,
+    # which is why we use 5 days / 0.9.) created_at also set >= min_age_days(7)
+    # via 8 days so the age gate passes; last_referenced_at drives decay.
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE memory
+            SET last_referenced_at = now() - interval '5 days',
+                created_at = now() - interval '8 days',
+                reference_count = 5,
+                confidence = 0.9
+            WHERE id = %s
+            """,
+            (promo_summary_id,),
+        )
+        conn.commit()
+
+    # 4 (set up the negative case before promoting): a NON-eligible episodic
+    # row -- fresh + low refs -- must NOT be promoted.
+    neg_entity = "topic:promotion-negative"
+    neg_seeded = []
+    for i, content in enumerate(promo_sources):
+        mid, _ = remember(
+            WS, neg_entity, content,
+            "agent", f"neg-watcher-{i}",
+            confidence=0.7,
+            tier="working",
+        )
+        neg_seeded.append(mid)
+    promote_working_to_episodic(WS)
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM memory "
+            "WHERE workspace = %s AND entity_key = %s AND tier = 'episodic' "
+            "ORDER BY id DESC LIMIT 1",
+            (WS, neg_entity),
+        )
+        neg_summary_id = cur.fetchone()[0]
+    # Leave it as-is: brand new (age ~0) and reference_count=0 -> ineligible.
+
+    # 3. Promote. The seeded summary should flip to semantic.
+    e2s = promote_episodic_to_semantic(WS)
+    check(
+        "promote_episodic_to_semantic promoted the durable summary",
+        promo_summary_id in e2s["ids"],
+    )
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT tier FROM memory WHERE id = %s", (promo_summary_id,),
+        )
+        promoted_tier = cur.fetchone()[0]
+    check(
+        "durable episodic summary is now tier='semantic'",
+        promoted_tier == "semantic",
+    )
+
+    # 4. Assert the non-eligible row was NOT promoted.
+    check(
+        "fresh/unused episodic row is NOT promoted",
+        neg_summary_id not in e2s["ids"],
+    )
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT tier FROM memory WHERE id = %s", (neg_summary_id,),
+        )
+        neg_tier = cur.fetchone()[0]
+    check(
+        "fresh/unused episodic row stays tier='episodic'",
+        neg_tier == "episodic",
+    )
 
     print()
     if _FAILS:

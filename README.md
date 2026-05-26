@@ -514,3 +514,64 @@ land independently.
   occurrences -- a fingerprint, not an identity, but information leakage at
   the margins. A k-anonymity or differential-privacy noise layer on counts
   would close this.
+
+## Phase 11: tier auto-promotion
+
+The tier model (`working` / `episodic` / `semantic` / `procedural`) always had
+a *downward* path -- `decay.evict_stale` deletes cold low-tier rows -- but a
+row's tier was set once at write time and never moved up. Phase 11 closes the
+loop with the *upward* path: memories that prove durable get promoted to higher
+tiers automatically.
+
+### The two upward transitions
+
+1. **working -> episodic (accumulation).** When an entity has accumulated
+   `>= min_rows` (default 3) un-compressed `working` rows, they get folded into
+   one `episodic` summary via the existing extractive `compress()` (verbatim
+   sentences + per-sentence lineage; see Phase 8). `promote.py` only
+   orchestrates -- it finds the eligible entities and calls `compress()`, which
+   writes the summary and flags each source `compressed_into`.
+
+2. **episodic -> semantic (age + use).** An `episodic` summary that has *proven
+   durable* gets promoted to `semantic` (longer half-life, higher floor: it
+   stops fading). "Proven durable" is two signals together:
+   - **age**: at least `min_age_days` (default 7) old -- it has had time to
+     decay and didn't vanish;
+   - **confidence**: its decayed `effective_confidence` is still `>= min_eff`
+     (default 0.5);
+   - **use**: `reference_count >= min_refs` (default 3) -- it has actually been
+     read, not just sat there.
+
+   `semantic -> procedural` is **NOT** automatic. Procedural is hand-authored
+   "how-to" knowledge, so it stays a manual step.
+
+### The reference_count signal
+
+`reference_count` (added to `memory` in this phase, defaults to 0) complements
+`last_referenced_at`: the timestamp says *when last used*, the count says *how
+proven*. Promotion to `semantic` needs both age (survived decay) and use
+(count).
+
+Reinforcement happens in `writeback.recall()` and
+`retrieval._reinforce_memory()` (they bump `last_referenced_at` on every read).
+Wiring the `reference_count = reference_count + 1` bump into those two sites is
+a **pending one-liner** -- it's deliberately not done here because those files
+are owned by other work this round. Until it lands, the count stays 0 and the
+reinforcement path simply promotes nothing, which is safe: a row that was never
+used should not be promoted.
+
+### CLI
+
+```bash
+# Run both promotions for a workspace.
+python scripts/promote.py --workspace acme
+
+# Report what would happen, write nothing.
+python scripts/promote.py --workspace acme --dry-run
+```
+
+The thresholds are tunable: `--min-rows`, `--min-age-days`, `--min-eff`,
+`--min-refs`. `promote_all(workspace)` runs both transitions in one call;
+working->episodic runs first, and a freshly-created episodic summary can't be
+promoted to semantic in the same pass (it can't meet the age + use gates yet) --
+promotion is a multi-pass, time-gated process by design.
