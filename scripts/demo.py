@@ -43,6 +43,21 @@ def reset(workspaces: tuple[str, ...]) -> None:
     # demonstrate the dedup gate without re-seeding.
     with connect() as conn, conn.cursor() as cur:
         for ws in workspaces:
+            # summary_lineage.source_row_id and memory_conflict.{row_a,row_b}
+            # reference memory(id) WITHOUT cascade, so they must be cleared
+            # before the memory rows they point at. (summary_lineage.summary_id
+            # cascades, but source_row_id does not -- a compressed entity in
+            # this workspace would otherwise block the delete.)
+            cur.execute(
+                "DELETE FROM summary_lineage WHERE summary_id IN "
+                "(SELECT id FROM memory WHERE workspace = %s) "
+                "OR source_row_id IN "
+                "(SELECT id FROM memory WHERE workspace = %s)",
+                (ws, ws),
+            )
+            cur.execute(
+                "DELETE FROM memory_conflict WHERE workspace = %s", (ws,)
+            )
             cur.execute("DELETE FROM memory WHERE workspace = %s", (ws,))
             cur.execute("DELETE FROM chunk_acl WHERE workspace = %s", (ws,))
             cur.execute("DELETE FROM raw_events WHERE workspace = %s", (ws,))
