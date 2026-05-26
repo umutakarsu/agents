@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>What is memlayer?</title>
+<style>
+  :root{
+    --bg:#0b0d12; --text:#eef2f7; --dim:#9aa6b4; --muted:#6b7787;
+    --accent:#5ea8ff; --accent2:#a78bfa; --good:#4cc38a; --warn:#f0b84a; --bad:#ef6b73;
+    --sans:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
+    --card:#141a22; --line:#222b36;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:radial-gradient(circle at 20% 15%,rgba(94,168,255,.10),transparent 55%),
+               radial-gradient(circle at 80% 85%,rgba(167,139,250,.10),transparent 55%),var(--bg);
+    color:var(--text);font-family:var(--sans);display:flex;align-items:center;justify-content:center;
+    min-height:100vh;padding:24px;
+  }
+  .stage{width:min(900px,96vw);aspect-ratio:16/10;position:relative;border-radius:16px;overflow:hidden;
+         background:#0c1016;border:1px solid var(--line);box-shadow:0 30px 90px rgba(0,0,0,.6)}
+  .progress{position:absolute;top:0;left:0;height:3px;width:0;z-index:9;
+            background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .2s linear}
+  .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+         text-align:center;padding:48px;opacity:0;transition:opacity .55s ease;gap:26px}
+  .scene.on{opacity:1}
+  .big{font-size:clamp(24px,3.4vw,38px);font-weight:700;line-height:1.18;letter-spacing:-.02em;max-width:740px}
+  .big .hl{background:linear-gradient(120deg,#fff,#c4b5fd 55%,#5ea8ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .small{font-size:clamp(15px,1.8vw,18px);color:var(--dim);max-width:620px;line-height:1.55}
+  .step{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent2)}
+
+  /* tool cards */
+  .tools{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+  .tool{width:130px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 14px;
+        display:flex;flex-direction:column;align-items:center;gap:10px;position:relative}
+  .ico{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px}
+  .ico.chat{background:rgba(94,168,255,.16)}
+  .ico.code{background:rgba(167,139,250,.16)}
+  .ico.help{background:rgba(76,195,138,.16)}
+  .tool .nm{font-size:13px;color:var(--dim)}
+  .bubble{position:absolute;top:-14px;right:-10px;width:30px;height:30px;border-radius:50%;
+          background:#1b2230;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+          font-size:15px;color:var(--muted)}
+  /* hub diagram */
+  .hub{position:relative;width:420px;height:230px}
+  .core{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+        padding:14px 22px;border-radius:14px;font-weight:700;font-size:15px;
+        background:linear-gradient(135deg,var(--accent2),var(--accent));color:#fff;
+        box-shadow:0 0 0 6px rgba(94,168,255,.12),0 10px 30px rgba(94,168,255,.3);z-index:3}
+  .sat{position:absolute;width:104px;background:var(--card);border:1px solid var(--line);border-radius:11px;
+       padding:10px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);z-index:2}
+  .sat .d{width:22px;height:22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px}
+  .sat.s1{left:0;top:8px}.sat.s2{right:0;top:8px}.sat.s3{left:50%;transform:translateX(-50%);bottom:6px}
+  .wire{position:absolute;inset:0;z-index:1}
+  .wire path{stroke:rgba(94,168,255,.45);stroke-width:2;fill:none;stroke-dasharray:5 5;
+             animation:flow 1.2s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-20}}
+
+  /* two people ask */
+  .ask{display:flex;gap:34px;flex-wrap:wrap;justify-content:center;align-items:stretch}
+  .person{width:280px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;text-align:left}
+  .who{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .who .av{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px}
+  .who .av.intern{background:rgba(125,138,160,.2)}
+  .who .av.ceo{background:rgba(240,184,74,.18)}
+  .who .role{font-weight:600;font-size:14px}
+  .q{font-size:13px;color:var(--muted);font-style:italic;margin-bottom:12px}
+  .ans{border-radius:10px;padding:11px 13px;font-size:13.5px;line-height:1.4}
+  .ans.deny{background:rgba(125,138,160,.12);color:var(--muted);border:1px dashed var(--line)}
+  .ans.allow{background:rgba(240,184,74,.12);color:var(--warn);border:1px solid rgba(240,184,74,.4)}
+  .tag{font-size:11px;color:var(--muted);margin-top:9px}
+
+  /* correction */
+  .corr{display:flex;flex-direction:column;gap:12px;width:480px}
+  .line{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:13px 16px;font-size:15px;text-align:left}
+  .line.strike{opacity:.5}
+  .line.strike .ltxt{text-decoration:line-through;color:var(--muted)}
+  .line.win{border-color:rgba(76,195,138,.5);box-shadow:0 0 0 3px rgba(76,195,138,.1)}
+  .who2{font-size:10px;letter-spacing:.08em;font-weight:700;padding:3px 8px;border-radius:5px}
+  .who2.ai{background:rgba(125,138,160,.2);color:#aeb8c6}
+  .who2.hu{background:rgba(76,195,138,.16);color:var(--good)}
+  .mark{margin-left:auto;font-size:16px}
+
+  .replay{position:absolute;bottom:14px;right:16px;font-size:12px;color:var(--muted);cursor:pointer;
+          border:1px solid var(--line);background:var(--card);padding:6px 12px;border-radius:8px;opacity:0;transition:.3s;z-index:9}
+  .replay.show{opacity:1}
+  .pop{opacity:0;transform:translateY(12px) scale(.97);transition:.5s}
+  .pop.in{opacity:1;transform:none}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="progress" id="prog"></div>
+
+  <!-- 1 — the problem -->
+  <section class="scene" data-dur="4600">
+    <div class="step">the problem</div>
+    <div class="big">Every AI tool at your company is brilliant —<br/><span class="hl">but has amnesia.</span></div>
+    <div class="tools">
+      <div class="tool"><div class="ico chat">💬</div><div class="nm">Chat assistant</div><div class="bubble">?</div></div>
+      <div class="tool"><div class="ico code">⌨️</div><div class="nm">Coding helper</div><div class="bubble">?</div></div>
+      <div class="tool"><div class="ico help">🎧</div><div class="nm">Support bot</div><div class="bubble">?</div></div>
+    </div>
+    <div class="small">Each one forgets everything. None of them share what they learn. And they'll happily repeat things people aren't supposed to see.</div>
+  </section>
+
+  <!-- 2 — the cost -->
+  <section class="scene" data-dur="4200">
+    <div class="step">the cost</div>
+    <div class="big">So everyone re-explains the same things,<br/><span class="hl">over and over.</span></div>
+    <div class="small">Your company's knowledge is scattered across Slack, email, docs, and code. Every new tool starts from zero — and rebuilds the same connections, with the same risks.</div>
+  </section>
+
+  <!-- 3 — the fix -->
+  <section class="scene" data-dur="5000">
+    <div class="step">the fix</div>
+    <div class="big">memlayer is <span class="hl">one shared memory</span><br/>that every AI tool plugs into.</div>
+    <div class="hub">
+      <svg class="wire" viewBox="0 0 420 230" preserveAspectRatio="none">
+        <path d="M 55 40 C 150 90, 180 110, 210 115"/>
+        <path d="M 365 40 C 270 90, 240 110, 210 115"/>
+        <path d="M 210 200 C 210 170, 210 150, 210 130"/>
+      </svg>
+      <div class="sat s1"><div class="d" style="background:rgba(94,168,255,.16)">💬</div>Chat</div>
+      <div class="sat s2"><div class="d" style="background:rgba(167,139,250,.16)">⌨️</div>Code</div>
+      <div class="sat s3"><div class="d" style="background:rgba(76,195,138,.16)">🎧</div>Support</div>
+      <div class="core">shared memory</div>
+    </div>
+    <div class="small">Connect it once. Now every tool instantly knows everything about your company — learn it once, known everywhere.</div>
+  </section>
+
+  <!-- 4 — trust (the killer, relatable) -->
+  <section class="scene" data-dur="5600">
+    <div class="step">and it's safe</div>
+    <div class="big">It always knows <span class="hl">who's allowed to see what.</span></div>
+    <div class="ask">
+      <div class="person pop" data-pop="1">
+        <div class="who"><div class="av intern">🧑‍💻</div><div class="role">New intern</div></div>
+        <div class="q">"What's our secret plan?"</div>
+        <div class="ans deny">Nothing to show.</div>
+        <div class="tag">Not allowed — so it isn't even hinted at.</div>
+      </div>
+      <div class="person pop" data-pop="2">
+        <div class="who"><div class="av ceo">👩‍💼</div><div class="role">The CEO</div></div>
+        <div class="q">"What's our secret plan?"</div>
+        <div class="ans allow">"Acquire a competitor in Q3."</div>
+        <div class="tag">Allowed — so the answer appears.</div>
+      </div>
+    </div>
+    <div class="small">Same question, different person — handled automatically. No one can trick it into leaking.</div>
+  </section>
+
+  <!-- 5 — humans win -->
+  <section class="scene" data-dur="5000">
+    <div class="step">and it stays honest</div>
+    <div class="big">When the AI gets it wrong,<br/><span class="hl">a person corrects it — for good.</span></div>
+    <div class="corr">
+      <div class="line strike pop" data-pop="1"><span class="who2 ai">AI GUESS</span><span class="ltxt">"Ali leads the retrieval team."</span><span class="mark">✕</span></div>
+      <div class="line win pop" data-pop="2"><span class="who2 hu">PERSON</span><span class="ltxt" style="color:var(--text)">"Ali leads the Platform team."</span><span class="mark">✓</span></div>
+    </div>
+    <div class="small">A person's correction can never be overwritten by a later AI guess. And you can always see who said what, and when.</div>
+  </section>
+
+  <!-- 6 — closing -->
+  <section class="scene" data-dur="5200">
+    <div class="step">in one sentence</div>
+    <div class="big">One shared memory for every AI tool.<br/><span class="hl">Knows everything. Tells each person<br/>only what they should know.</span></div>
+    <div class="small" style="font-size:16px">That's memlayer.</div>
+  </section>
+
+  <div class="replay" id="replay">↻ replay</div>
+</div>
+
+<script>
+(function(){
+  const scenes=[...document.querySelectorAll('.scene')];
+  const prog=document.getElementById('prog');
+  const replay=document.getElementById('replay');
+  let i=0, timer=null, raf=null;
+  function play(idx){
+    scenes.forEach(s=>s.classList.remove('on'));
+    const s=scenes[idx]; s.classList.add('on');
+    const dur=+s.dataset.dur||4500;
+    const start=performance.now();
+    cancelAnimationFrame(raf);
+    (function step(t){
+      const p=Math.min(1,(t-start)/dur); prog.style.width=(p*100)+'%';
+      if(p<1) raf=requestAnimationFrame(step);
+    })(start);
+    // stagger any .pop elements in this scene
+    s.querySelectorAll('.pop').forEach((el,k)=>{el.classList.remove('in');setTimeout(()=>el.classList.add('in'),450+220*k);});
+    clearTimeout(timer);
+    timer=setTimeout(()=>{ i++; if(i<scenes.length) play(i); else {prog.style.width='100%';replay.classList.add('show');} },dur);
+  }
+  replay.addEventListener('click',()=>{i=0;replay.classList.remove('show');play(0);});
+  play(0);
+})();
+</script>
+</body>
+</html>

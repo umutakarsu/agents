@@ -245,6 +245,11 @@ def tour() -> FileResponse:
     return FileResponse(str(STATIC / "tour.html"))
 
 
+@app.get("/explainer")
+def explainer() -> FileResponse:
+    return FileResponse(str(STATIC / "explainer.html"))
+
+
 # ---------------------------------------------------------------------------
 # Phase 7: identity unification endpoints.
 #
